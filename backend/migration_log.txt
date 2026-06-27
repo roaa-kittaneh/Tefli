@@ -1,0 +1,9 @@
+Migration run at 2026-06-27T11:10:10.700Z
+Database connected successfully.
+Found 0 records on 2026-06-27 to update.
+Successfully updated 0 records to 2026-06-29.
+Verification: Found 4 records on 2026-06-29.
+  - ID: 11, Vaccine: 11, Status: Upcoming, Sched: 2026-06-29, Taken: null
+  - ID: 29, Vaccine: 1, Status: Completed, Sched: 2026-06-29, Taken: 2026-06-29
+  - ID: 30, Vaccine: 2, Status: Completed, Sched: 2026-06-25, Taken: 2026-06-29
+  - ID: 43, Vaccine: 1, Status: Completed, Sched: 2026-01-27, Taken: 2026-06-29

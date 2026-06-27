@@ -5,6 +5,7 @@ import { CalendarView } from './pages/CalendarView';
 import { HistoryView } from './pages/HistoryView';
 import { FaqView } from './pages/FaqView';
 import { ChatbotPage } from './pages/ChatbotPage';
+import { HospitalMapPage } from './pages/HospitalMapPage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
 import { useVaccineStore } from './store/useVaccineStore';
@@ -28,6 +29,7 @@ function App() {
     switch (activeTab) {
       case 'dashboard': return <Dashboard />;
       case 'calendar':  return <CalendarView />;
+      case 'map':       return <HospitalMapPage />;
       case 'history':   return <HistoryView />;
       case 'faq':       return <FaqView />;
       case 'chatbot':   return <ChatbotPage />;

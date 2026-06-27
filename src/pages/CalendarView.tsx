@@ -1,14 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useVaccineStore } from '../store/useVaccineStore';
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, CheckCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, CheckCircle, MapPin, Loader2, Building2 } from 'lucide-react';
+import type { VaccineHospitals } from '../types';
+
+// Cache to avoid re-fetching same vaccine hospitals within session
+const hospitalCache: Record<string, VaccineHospitals> = {};
 
 export const CalendarView: React.FC = () => {
-  const { children, selectedChildId, vaccines, toggleVaccineStatus } = useVaccineStore();
+  const { children, selectedChildId, vaccines, toggleVaccineStatus, fetchSchedule, fetchVaccineHospitals, setActiveTab, setSelectedHospitalIdForMap } = useVaccineStore();
   const child = children.find(c => c.id === selectedChildId) || children[0];
   const childVaccines = vaccines[child.id] || [];
 
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 6, 1));
-  const [selectedDate, setSelectedDate] = useState<string>('2026-07-12');
+  const [currentDate, setCurrentDate] = useState(new Date(2026, 5, 1));
+  const [selectedDate, setSelectedDate] = useState<string>('2026-06-29');
+
+  // Per-vaccine hospital data: { vaccineId -> VaccineHospitals | 'loading' | null }
+  const [vaccineHospitals, setVaccineHospitals] = useState<Record<string, VaccineHospitals | 'loading' | null>>({});
+
+  // Load appointments on mount
+  useEffect(() => {
+    if (child && child.id) {
+      fetchSchedule(child.id);
+    }
+  }, [child?.id]);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -61,6 +75,27 @@ export const CalendarView: React.FC = () => {
 
   const selectedDateVaccines = getVaccinesForDate(selectedDate);
 
+  // Load hospital data when a vaccine is visible
+  const loadHospitalsForVaccine = useCallback(async (vaccineId: string) => {
+    if (hospitalCache[vaccineId]) {
+      setVaccineHospitals(prev => ({ ...prev, [vaccineId]: hospitalCache[vaccineId] }));
+      return;
+    }
+    if (vaccineHospitals[vaccineId]) return; // already loading or loaded
+
+    setVaccineHospitals(prev => ({ ...prev, [vaccineId]: 'loading' }));
+    const result = await fetchVaccineHospitals(vaccineId);
+    hospitalCache[vaccineId] = result;
+    setVaccineHospitals(prev => ({ ...prev, [vaccineId]: result }));
+  }, [vaccineHospitals, fetchVaccineHospitals]);
+
+  // Load hospitals for all vaccines on selected date whenever the date changes
+  useEffect(() => {
+    selectedDateVaccines.forEach(v => {
+      loadHospitalsForVaccine(v.vaccineId);
+    });
+  }, [selectedDate, childVaccines.length]);
+
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-8 animate-fade-in pb-24 md:pb-8">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -69,6 +104,7 @@ export const CalendarView: React.FC = () => {
           <p className="text-xs md:text-sm text-[#6C8480] mt-1 font-medium">الجدول الزمني التفاعلي ومواعيد التطعيم</p>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* ── Calendar grid ─────────────────────────────────────────── */}
           <div className="lg:col-span-2 bg-white rounded-3xl p-5 border border-[#BAC8B1]/30 shadow-sm flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between pb-4 border-b border-[#BAC8B1]/20">
@@ -93,13 +129,14 @@ export const CalendarView: React.FC = () => {
             </div>
           </div>
 
+          {/* ── Vaccine detail panel ───────────────────────────────────── */}
           <div className="bg-white rounded-3xl p-6 border border-[#BAC8B1]/30 shadow-sm flex flex-col h-full justify-between min-h-[400px]">
             <div>
               <div className="pb-4 border-b border-[#BAC8B1]/20">
                 <span className="text-[10px] font-bold text-[#6C8480] block">الجدول المختار</span>
                 <h3 className="font-extrabold text-sm text-[#404E3B] mt-0.5">{selectedDate}</h3>
               </div>
-              <div className="mt-5 space-y-4 max-h-[360px] overflow-y-auto pl-1">
+              <div className="mt-5 space-y-4 max-h-[520px] overflow-y-auto pl-1">
                 {selectedDateVaccines.length === 0 ? (
                   <div className="text-center py-12 flex flex-col items-center">
                     <div className="w-16 h-16 rounded-full bg-[#E6E6E6]/60 flex items-center justify-center text-[#6C8480] mb-3"><CalendarIcon size={24} /></div>
@@ -107,39 +144,137 @@ export const CalendarView: React.FC = () => {
                     <p className="text-xs text-[#6C8480] mt-1 px-4 leading-relaxed">لا توجد تطعيمات مجدولة لـ {child.name.split(' ')[0]} في هذا اليوم.</p>
                   </div>
                 ) : (
-                  selectedDateVaccines.map((v) => (
-                    <div key={v.id} className="bg-[#BAC8B1]/10 rounded-2xl p-4 border border-[#BAC8B1]/20 space-y-3">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="bg-white/90 text-[#404E3B] text-[10px] font-bold px-2 py-0.5 rounded-md border border-[#BAC8B1]/20">{v.code}</span>
-                          <h4 className="font-bold text-sm text-[#404E3B] mt-1.5 leading-tight">{v.name}</h4>
+                  selectedDateVaccines.map((v) => {
+                    const hData = vaccineHospitals[v.vaccineId];
+                    const isLoadingHospitals = hData === 'loading';
+                    const hospitals = typeof hData === 'object' && hData !== null ? hData : null;
+
+                    return (
+                      <div key={v.id} className="bg-[#BAC8B1]/10 rounded-2xl p-4 border border-[#BAC8B1]/20 space-y-3">
+                        {/* ── Vaccine header ─────────────────────────── */}
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="bg-white/90 text-[#404E3B] text-[10px] font-bold px-2 py-0.5 rounded-md border border-[#BAC8B1]/20">{v.code}</span>
+                            <h4 className="font-bold text-sm text-[#404E3B] mt-1.5 leading-tight">{v.name}</h4>
+                          </div>
+                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md ${
+                            v.status === 'completed' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                              : v.status === 'overdue' ? 'bg-red-100 text-red-700 border border-red-200 animate-pulse'
+                              : 'bg-amber-100 text-amber-700 border border-amber-200'
+                          }`}>{v.status === 'completed' ? 'مكتمل' : v.status === 'overdue' ? 'متأخر' : 'قادم'}</span>
                         </div>
-                        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md ${
-                          v.status === 'completed' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                            : v.status === 'overdue' ? 'bg-red-100 text-red-700 border border-red-200 animate-pulse'
-                            : 'bg-amber-100 text-amber-700 border border-amber-200'
-                        }`}>{v.status === 'completed' ? 'مكتمل' : v.status === 'overdue' ? 'متأخر' : 'قادم'}</span>
-                      </div>
-                      <p className="text-xs text-[#6C8480] leading-relaxed">{v.description}</p>
-                      {v.administratorName && (
-                        <div className="text-[10px] text-[#6C8480]/90 bg-white/60 p-2 rounded-xl border border-[#BAC8B1]/20">
-                          <p>🩺 الطبيب: <strong className="text-[#404E3B]">{v.administratorName}</strong></p>
-                          <p className="mt-0.5">📍 العيادة: <strong className="text-[#404E3B]">{v.clinicName}</strong></p>
-                        </div>
-                      )}
-                      <div className="pt-2 flex justify-end gap-2">
-                        {v.status !== 'completed' ? (
-                          <button onClick={() => toggleVaccineStatus(child.id, v.id, 'completed')}
-                            className="bg-[#7B9669] hover:bg-[#7B9669]/90 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 shadow-sm">
-                            <CheckCircle size={12} /> تم التطعيم
-                          </button>
-                        ) : (
-                          <button onClick={() => toggleVaccineStatus(child.id, v.id, 'upcoming')}
-                            className="bg-white hover:bg-[#E6E6E6]/40 border border-[#BAC8B1]/30 text-[#404E3B] text-[11px] font-bold px-3 py-1.5 rounded-xl transition-all">إلغاء الإكمال</button>
+
+                        <p className="text-xs text-[#6C8480] leading-relaxed">{v.description}</p>
+
+                        {v.administratorName && (
+                          <div className="text-[10px] text-[#6C8480]/90 bg-white/60 p-2 rounded-xl border border-[#BAC8B1]/20">
+                            <p>🩺 الطبيب: <strong className="text-[#404E3B]">{v.administratorName}</strong></p>
+                            <p className="mt-0.5">📍 العيادة: <strong className="text-[#404E3B]">{v.clinicName}</strong></p>
+                          </div>
                         )}
+
+                        {/* ── Available At section ───────────────────── */}
+                        <div className="bg-white/70 rounded-xl p-3 border border-[#BAC8B1]/20">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] font-extrabold text-[#404E3B] uppercase tracking-wider">متاح في</p>
+                            {isLoadingHospitals && (
+                              <Loader2 size={12} className="animate-spin text-[#6C8480]" />
+                            )}
+                          </div>
+
+                          {isLoadingHospitals ? (
+                            <div className="space-y-1.5">
+                              {[1,2,3].map(i => (
+                                <div key={i} className="h-5 bg-[#BAC8B1]/30 rounded animate-pulse" />
+                              ))}
+                            </div>
+                          ) : !hospitals || hospitals.all.length === 0 ? (
+                            <p className="text-[11px] text-[#6C8480] italic">لا توجد بيانات مستشفيات</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {/* Government */}
+                              {hospitals.government.length > 0 && (
+                                <div>
+                                  <div className="flex items-center gap-1 mb-1">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                                    <span className="text-[10px] font-bold text-emerald-700">🏛️ حكومية</span>
+                                  </div>
+                                  <ul className="space-y-1 mr-2 text-right">
+                                    {hospitals.government.map(h => (
+                                      <li key={h.id}>
+                                        <button
+                                          onClick={() => {
+                                            setSelectedHospitalIdForMap(h.id);
+                                            setActiveTab('map');
+                                          }}
+                                          className="flex items-center gap-1.5 text-[11px] text-[#404E3B] font-medium hover:text-[#7B9669] hover:underline transition-all text-right"
+                                        >
+                                          <Building2 size={9} className="text-emerald-600 flex-shrink-0" />
+                                          {h.name}
+                                        </button>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                              {/* Private */}
+                              {hospitals.private.length > 0 && (
+                                <div>
+                                  <div className="flex items-center gap-1 mb-1">
+                                    <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
+                                    <span className="text-[10px] font-bold text-blue-700">🏢 خاصة</span>
+                                  </div>
+                                  <ul className="space-y-1 mr-2 text-right">
+                                    {hospitals.private.map(h => (
+                                      <li key={h.id}>
+                                        <button
+                                          onClick={() => {
+                                            setSelectedHospitalIdForMap(h.id);
+                                            setActiveTab('map');
+                                          }}
+                                          className="flex items-center gap-1.5 text-[11px] text-[#404E3B] font-medium hover:text-[#7B9669] hover:underline transition-all text-right"
+                                        >
+                                          <Building2 size={9} className="text-blue-600 flex-shrink-0" />
+                                          {h.name}
+                                        </button>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* View on Map button */}
+                          <button
+                            onClick={() => {
+                              if (hospitals && hospitals.all.length > 0) {
+                                setSelectedHospitalIdForMap(hospitals.all[0].id);
+                              }
+                              setActiveTab('map');
+                            }}
+                            className="mt-3 w-full flex items-center justify-center gap-1.5 text-[11px] font-bold text-[#7B9669] hover:text-white border border-[#7B9669]/50 hover:bg-[#7B9669] rounded-lg py-1.5 transition-all duration-200"
+                          >
+                            <MapPin size={11} />
+                            عرض على الخريطة
+                          </button>
+                        </div>
+
+                        {/* ── Actions ────────────────────────────────── */}
+                        <div className="pt-1 flex justify-end gap-2">
+                          {v.status !== 'completed' ? (
+                            <button onClick={() => toggleVaccineStatus(child.id, v.id, 'completed')}
+                              className="bg-[#7B9669] hover:bg-[#7B9669]/90 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 shadow-sm">
+                              <CheckCircle size={12} /> تم التطعيم
+                            </button>
+                          ) : (
+                            <button onClick={() => toggleVaccineStatus(child.id, v.id, 'upcoming')}
+                              className="bg-white hover:bg-[#E6E6E6]/40 border border-[#BAC8B1]/30 text-[#404E3B] text-[11px] font-bold px-3 py-1.5 rounded-xl transition-all">إلغاء الإكمال</button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

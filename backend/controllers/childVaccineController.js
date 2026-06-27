@@ -201,3 +201,105 @@ exports.updateChildVaccineStatus = async (req, res, next) => {
     next(error);
   }
 };
+
+// Helper to add days to a date string
+const addDays = (dateStr, days) => {
+  const date = new Date(dateStr);
+  date.setDate(date.getDate() + days);
+  return date.toISOString().split('T')[0];
+};
+
+// Helper to add months to a date string
+const addMonths = (dateStr, months) => {
+  const date = new Date(dateStr);
+  date.setMonth(date.getMonth() + months);
+  return date.toISOString().split('T')[0];
+};
+
+// Reschedule Vaccine with Safe Window Validation
+exports.rescheduleVaccine = async (req, res, next) => {
+  try {
+    const { newDate } = req.body;
+
+    if (!newDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى تقديم التاريخ الجديد للموعد.',
+      });
+    }
+
+    // Retrieve the child vaccine record with associated child and vaccine details
+    const record = await ChildVaccine.findByPk(req.params.id, {
+      include: [
+        { model: Vaccine, as: 'vaccine' },
+        { model: Child, as: 'child' }
+      ]
+    });
+
+    if (!record) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على سجل التطعيم.',
+      });
+    }
+
+    // Ownership check for Parents
+    if (req.user.role === 'Parent' && record.child.parentId !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'ليس لديك الصلاحية لتعديل هذا السجل.',
+      });
+    }
+
+    // Calculate the recommended due date (birthDate + recommendedAgeMonths)
+    const birthDate = record.child.birthDate;
+    const recommendedAgeMonths = record.vaccine.recommendedAgeMonths;
+    const recommendedDueDate = addMonths(birthDate, recommendedAgeMonths);
+
+    // Calculate the safe window range
+    const safeWindowStartDays = record.vaccine.safeWindowStartDays || 0;
+    const safeWindowEndDays = record.vaccine.safeWindowEndDays || 30;
+
+    const minAllowedDate = addDays(recommendedDueDate, safeWindowStartDays);
+    const maxAllowedDate = addDays(recommendedDueDate, safeWindowEndDays);
+
+    // Validate that the requested newDate falls within the safe period
+    if (newDate < minAllowedDate || newDate > maxAllowedDate) {
+      return res.status(400).json({
+        success: false,
+        message: `لا يمكن إعادة جدولة التطعيم خارج الفترة الآمنة المحددة طبياً. الفترة المسموحة هي بين ${minAllowedDate} و ${maxAllowedDate}.`,
+        minAllowedDate,
+        maxAllowedDate,
+        recommendedDueDate,
+      });
+    }
+
+    // Update scheduledDate
+    record.scheduledDate = newDate;
+
+    // Adjust status relative to today if not completed
+    if (record.status !== 'Completed') {
+      const todayStr = new Date().toISOString().split('T')[0];
+      record.status = newDate < todayStr ? 'Pending' : 'Upcoming';
+    }
+
+    await record.save();
+
+    // Create in-app notification for rescheduling
+    await Notification.create({
+      userId: record.child.parentId,
+      childVaccineId: record.id,
+      title: 'إعادة جدولة موعد التطعيم 📅',
+      body: `تمت إعادة جدولة تطعيم "${record.vaccine.vaccineName}" للطفل ${record.child.firstName} إلى التاريخ الجديد ${newDate}.`,
+      isRead: false,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'تمت إعادة جدولة التطعيم بنجاح ضمن الفترة الآمنة.',
+      data: record,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

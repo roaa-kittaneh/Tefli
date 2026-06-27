@@ -40,7 +40,7 @@ export const FaqView: React.FC = () => {
                 <Sparkles size={22} className="text-amber-300" />
               </div>
               <div>
-                <h3 className="font-extrabold text-white text-base leading-tight">مساعد تفلي الذكي</h3>
+                <h3 className="font-extrabold text-white text-base leading-tight">مساعد طفلي الذكي</h3>
                 <p className="text-xs text-white/70 mt-0.5 font-medium">احصل على إجابات فورية واستشارات حول تطعيمات الأطفال طوال الوقت 24/7</p>
               </div>
             </div>
@@ -103,9 +103,21 @@ export const FaqView: React.FC = () => {
                       isExpanded ? 'max-h-[400px] border-t border-[#BAC8B1]/20' : 'max-h-0'
                     }`}
                   >
-                    <p className="p-5 md:p-6 text-xs sm:text-sm text-[#6C8480] leading-relaxed bg-[#BAC8B1]/5 text-right">
-                      {faq.answer}
-                    </p>
+                    <div className="p-5 md:p-6 text-xs sm:text-sm text-[#6C8480] leading-relaxed bg-[#BAC8B1]/5 text-right space-y-3">
+                      <p>{faq.answer}</p>
+                      
+                      <div className="pt-2.5 flex items-center justify-start border-t border-[#BAC8B1]/10">
+                        {faq.source && faq.source !== 'unverified' ? (
+                          <span className="bg-green-50 text-green-700 border border-green-200 text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                            🛡️ مصدر طبي معتمد: {faq.source}
+                          </span>
+                        ) : (
+                          <span className="bg-red-50 text-red-700 border border-red-200 text-[10px] font-bold px-2.5 py-1 rounded-full flex items-center gap-1">
+                            ⚠️ مصدر طبي غير موثق (unverified)
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               );

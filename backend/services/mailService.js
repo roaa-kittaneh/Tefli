@@ -23,13 +23,14 @@ transporter.verify((error, success) => {
  * @param {string} subject - Email subject
  * @param {string} html - HTML body content
  */
-const sendMail = async (to, subject, html) => {
+const sendMail = async (to, subject, html, text) => {
   try {
     const mailOptions = {
       from: mailConfig.from,
       to,
       subject,
       html,
+      text,
     };
 
     const info = await transporter.sendMail(mailOptions);
@@ -50,32 +51,40 @@ const sendMail = async (to, subject, html) => {
  * @param {string} scheduledDate - Scheduled date
  */
 const sendVaccinationReminderEmail = async (email, parentName, childName, vaccineName, scheduledDate) => {
-  const subject = 'تذكير موعد تطعيم طفلك - تفلي';
+  const subject = 'تذكير بموعد تطعيم طفلك قريباً';
+  
+  const text = `مرحباً ${parentName}،
+
+هذا تذكير بأن طفلك
+
+${childName}
+
+لديه موعد تطعيم خلال يومين.
+
+المطعوم:
+${vaccineName}
+
+تاريخ الموعد:
+${scheduledDate}
+
+يرجى عدم نسيان الموعد.
+
+SmartCare Jordan`;
+
   const html = `
-    <div style="font-family: 'Cairo', sans-serif; direction: rtl; text-align: right; max-width: 600px; margin: 0 auto; border: 1px solid #BAC8B1; border-radius: 16px; padding: 24px; background-color: #ffffff;">
-      <div style="text-align: center; margin-bottom: 20px;">
-        <span style="font-size: 40px;">👶</span>
-        <h2 style="color: #404E3B; margin-top: 10px;">نظام تذكير التطعيمات - تفلي</h2>
-      </div>
-      <p style="font-size: 16px; color: #404E3B; line-height: 1.6;">مرحباً <strong>${parentName}</strong>،</p>
-      <p style="font-size: 15px; color: #6C8480; line-height: 1.6;">
-        هذا تذكير ودّي بأن طفلك <strong>${childName}</strong> لديه موعد تطعيم مجدول قريباً:
-      </p>
-      <div style="background-color: #F4F7F2; border-right: 4px solid #7B9669; padding: 15px; margin: 20px 0; border-radius: 8px;">
-        <p style="margin: 5px 0; font-size: 15px; color: #404E3B;">💉 <strong>اسم التطعيم:</strong> ${vaccineName}</p>
-        <p style="margin: 5px 0; font-size: 15px; color: #404E3B;">📅 <strong>تاريخ الموعد:</strong> ${scheduledDate}</p>
-      </div>
-      <p style="font-size: 14px; color: #6C8480; line-height: 1.6;">
-        يرجى التأكد من زيارة أقرب مركز صحي أو عيادة أطفال لتلقي اللقاح في موعده المحدد لسلامة طفلك وحمايته.
-      </p>
-      <hr style="border: 0; border-top: 1px solid #BAC8B1; margin: 30px 0;">
-      <p style="font-size: 12px; color: #BAC8B1; text-align: center;">
-        شريككم في رعاية صحة أطفالكم · برنامج تفلي الوطني للتطعيمات
-      </p>
+    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333333; max-width: 600px; margin: 0 auto; border: 1px solid #BAC8B1; border-radius: 12px; padding: 24px; background-color: #ffffff; direction: rtl; text-align: right;">
+      <p>مرحباً ${parentName}،</p>
+      <p>هذا تذكير بأن طفلك</p>
+      <p><strong>${childName}</strong></p>
+      <p>لديه موعد تطعيم خلال يومين.</p>
+      <p><strong>المطعوم:</strong><br>${vaccineName}</p>
+      <p><strong>تاريخ الموعد:</strong><br>${scheduledDate}</p>
+      <p>يرجى عدم نسيان الموعد.</p>
+      <p><strong>SmartCare Jordan</strong></p>
     </div>
   `;
 
-  return sendMail(email, subject, html);
+  return sendMail(email, subject, html, text);
 };
 
 /**
@@ -85,7 +94,7 @@ const sendVaccinationReminderEmail = async (email, parentName, childName, vaccin
  * @param {string} resetUrl - URL to reset password
  */
 const sendPasswordResetEmail = async (email, name, resetUrl) => {
-  const subject = 'طلب إعادة تعيين كلمة المرور - تفلي';
+  const subject = 'طلب إعادة تعيين كلمة المرور - طفلي';
   const html = `
     <div style="font-family: 'Cairo', sans-serif; direction: rtl; text-align: right; max-width: 600px; margin: 0 auto; border: 1px solid #BAC8B1; border-radius: 16px; padding: 24px; background-color: #ffffff;">
       <div style="text-align: center; margin-bottom: 20px;">
@@ -94,7 +103,7 @@ const sendPasswordResetEmail = async (email, name, resetUrl) => {
       </div>
       <p style="font-size: 16px; color: #404E3B; line-height: 1.6;">مرحباً <strong>${name}</strong>،</p>
       <p style="font-size: 15px; color: #6C8480; line-height: 1.6;">
-        لقد تلقينا طلباً لإعادة تعيين كلمة المرور الخاصة بحسابك في تطبيق تفلي. للقيام بذلك، يرجى النقر على الزر أدناه:
+        لقد تلقينا طلباً لإعادة تعيين كلمة المرور الخاصة بحسابك في تطبيق طفلي. للقيام بذلك، يرجى النقر على الزر أدناه:
       </p>
       <div style="text-align: center; margin: 30px 0;">
         <a href="${resetUrl}" style="background-color: #7B9669; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: bold; font-size: 15px; display: inline-block;">
@@ -109,7 +118,7 @@ const sendPasswordResetEmail = async (email, name, resetUrl) => {
       </p>
       <hr style="border: 0; border-top: 1px solid #BAC8B1; margin: 30px 0;">
       <p style="font-size: 12px; color: #BAC8B1; text-align: center;">
-        برنامج تفلي الوطني لتتبع تطعيمات الأطفال
+        برنامج طفلي الوطني لتتبع تطعيمات الأطفال
       </p>
     </div>
   `;

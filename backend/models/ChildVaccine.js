@@ -36,6 +36,11 @@ module.exports = (sequelize) => {
       defaultValue: 'Upcoming',
       allowNull: false,
     },
+    reminderSent: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      allowNull: false,
+    },
   }, {
     tableName: 'child_vaccines',
     timestamps: true,

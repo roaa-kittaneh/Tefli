@@ -1,12 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useVaccineStore } from '../store/useVaccineStore';
-import { Sparkles, Send, User, RefreshCw, Baby } from 'lucide-react';
+import { Sparkles, Send, User, RefreshCw, Baby, AlertTriangle, Info, Zap } from 'lucide-react';
+import type { FAQItem } from '../types';
+
+const AI_API_URL = 'http://localhost:5000';
 
 interface Message {
   id: string;
   sender: 'user' | 'ai';
   text: string;
   timestamp: Date;
+  source?: string;
+  urgency?: 'low' | 'medium' | 'high';
+  recommendation?: string;
+  isAI?: boolean; // true = answered by Groq AI, false = local rules
 }
 
 const SUGGESTED_QUESTIONS = [
@@ -18,184 +25,141 @@ const SUGGESTED_QUESTIONS = [
   'ما هي الآثار الجانبية الشائعة؟',
 ];
 
-const getAIResponse = (input: string): string => {
-  const text = input.toLowerCase();
+const getAIResponse = (input: string, faqs: FAQItem[]): { text: string; source: string } => {
+  const t = input.toLowerCase().trim();
 
-  if (
-    text.includes('fever') ||
-    text.includes('temperature') ||
-    text.includes('hot') ||
-    text.includes('حرارة') ||
-    text.includes('سخونة') ||
-    text.includes('حمى')
-  ) {
-    return "🌡️ الحمى الخفيفة (أقل من 38.5 درجة مئوية) بعد التطعيم هي استجابة مناعية طبيعية - وهذا يعني أن اللقاح يعمل!\n\n**ماذا تفعل:**\n• قدم لطفلك الكثير من السوائل (الرضاعة الطبيعية أو الحليب الصناعي بشكل متكرر)\n• ألبس طفلك ملابس خفيفة ومريحة\n• ضع كمادات ماء فاتر على جبهته\n• يمكن إعطاء الباراسيتامول (الجرعة حسب الوزن) إذا أوصى طبيبك بذلك\n\n⚠️ **استشر الطبيب فوراً إذا:** تجاوزت الحرارة 39 درجة مئوية، أو استمرت لأكثر من 48 ساعة، أو بدا الطفل متعباً وخاملاً بشكل غير طبيعي.";
-  }
+  // 1. Search verified FAQs
+  const found = faqs.find(f =>
+    f.question.toLowerCase().includes(t) ||
+    t.includes(f.question.toLowerCase()) ||
+    f.question.split(' ').filter(w => w.length > 3 && t.includes(w.toLowerCase())).length >= 2
+  );
+  if (found) return { text: found.answer, source: found.source || 'وزارة الصحة الأردنية' };
 
-  if (
-    text.includes('pain') ||
-    text.includes('cry') ||
-    text.includes('sore') ||
-    text.includes('hurt') ||
-    text.includes('ألم') ||
-    text.includes('وجع') ||
-    text.includes('بكاء') ||
-    text.includes('يبكي') ||
-    text.includes('يصيح')
-  ) {
-    return "😢 من الطبيعي جداً أن يبكي الطفل بعد الحقنة بسبب الألم المؤقت للوخز.\n\n**لتهدئة طفلك:**\n• احضن طفلك وواسه فوراً\n• أرضعه طبيعياً أو صناعياً بعد الحقنة مباشرة (المص يساعد على التهدئة)\n• ضع كمادة نظيفة وباردة على موضع الحقن\n• دلك المنطقة بلطف شديد (إلا إذا نصحك الطبيب بغير ذلك)\n\n❌ **تجنب:** التدليك العنيف أو وضع الثلج مباشرة على الجلد.";
-  }
+  // 2. Topic matching
+  if (/مرحب|أهل|سلام|hello|hi|صباح|مساء/.test(t))
+    return { text: '👋 أهلاً بك! أنا المساعدة لينا، مساعد طفلي الذكي للأطفال.\n\nاسألني عن أي شيء في مجال تطعيم الأطفال:\n• 💉 جداول التطعيمات واللقاحات (BCG، MMR، سداسي، روتا...)\n• 🌡️ الأعراض الجانبية وكيفية التعامل معها\n• ⏭️ ماذا تفعل إذا فات موعد اللقاح\n• 🍼 التطعيم مع الرضاعة الطبيعية\n• 🏥 أين تحصل على اللقاحات مجاناً\n\nاسأل أي سؤال يخطر على بالك!', source: 'وزارة الصحة الأردنية' };
 
-  if (
-    text.includes('bath') ||
-    text.includes('shower') ||
-    text.includes('wash') ||
-    text.includes('swim') ||
-    text.includes('حمام') ||
-    text.includes('استحمام') ||
-    text.includes('يستحم') ||
-    text.includes('سباحة')
-  ) {
-    return "🛁 نعم! من الآمن تماماً تحميم طفلك بعد التطعيم.\n\n**نصائح:**\n• استخدم ماءً فاتراً (وليس ساخناً)\n• كن لطيفاً عند تنظيف منطقة موضع الحقن\n• تجنب فرك أو حك موضع الحقنة\n• جفف المنطقة برفق بقطعة قماش ناعمة\n\nالحمام الدافئ يمكن أن يساعد في استرخاء وتهدئة طفلك بعد التطعيم!";
-  }
+  if (/حرارة|سخونة|حمى|fever|temperature/.test(t))
+    return { text: '🌡️ الحمى الخفيفة (أقل من 38.5°م) بعد التطعيم طبيعية — تعني أن اللقاح يعمل!\n\n**ماذا تفعل:**\n• أعطِ طفلك سوائل كافية\n• ألبسه ملابس خفيفة\n• كمادات ماء فاتر على الجبهة\n• الباراسيتامول (حسب وزنه) إذا لزم\n\n⚠️ **استشر الطبيب فوراً إذا:** تجاوزت 39°م أو استمرت أكثر من 48 ساعة.', source: 'منظمة الصحة العالمية (WHO)' };
 
-  if (
-    text.includes('swelling') ||
-    text.includes('lump') ||
-    text.includes('bump') ||
-    text.includes('redness') ||
-    text.includes('red') ||
-    text.includes('احمرار') ||
-    text.includes('تورم') ||
-    text.includes('انتفاخ') ||
-    text.includes('كتلة') ||
-    text.includes('حبة')
-  ) {
-    return "🔴 ظهور تورم خفيف أو احمرار أو كتلة صغيرة في موضع الحقن أمر طبيعي وشائع جداً.\n\n**ماذا يحدث:** جهاز طفلك المناعي يتفاعل مع اللقاح - وهذا أمر متوقع!\n\n**من المفترض أن:**\n• يقل حجم التورم تدريجياً خلال أيام إلى بضعة أسابيع\n• لا يسبب أكثر من انزعاج خفيف للطفل\n\n**استشير الطبيب إذا:**\n• انتشر الاحمرار لمساحة أكبر من 10 سم\n• كان موضع الحقنة ساخناً جداً، أو صلباً، أو يخرج منه صديد\n• كبر حجم الكتلة بدلاً من أن يصغر بعد مرور أسبوعين";
-  }
+  if (/ألم|وجع|بكاء|يبكي|عياط|pain|cry/.test(t))
+    return { text: '😢 البكاء بعد الحقنة طبيعي تماماً.\n\n**لتهدئة طفلك:**\n• احضنه فوراً وواسيه\n• أرضعيه مباشرة بعد الحقن\n• كمادة باردة نظيفة على موضع الحقن\n• دلك المنطقة بلطف\n\n❌ تجنب الثلج مباشرة على الجلد.', source: 'وزارة الصحة الأردنية' };
 
-  if (
-    text.includes('cold') ||
-    text.includes('sick') ||
-    text.includes('cough') ||
-    text.includes('runny nose') ||
-    text.includes('sneezing') ||
-    text.includes('رشح') ||
-    text.includes('زكام') ||
-    text.includes('كحة') ||
-    text.includes('سعال') ||
-    text.includes('مريض') ||
-    text.includes('مرض')
-  ) {
-    return "🤧 الأمراض البسيطة لا تمنع عادة من أخذ التطعيم.\n\n**من الآمن عموماً التطعيم في الحالات التالية:**\n• الرشح الخفيف، أو سيلان الأنف، أو السعال البسيط\n• الحرارة المنخفضة (أقل من 38 درجة مئوية)\n• إذا كان الطفل نشيطاً ومتفاعلاً بشكل طبيعي\n\n**يُنصح بتأجيل التطعيم إذا:**\n• كان المرض متوسطاً أو شديداً\n• كانت الحرارة أعلى من 38 درجة مئوية\n• بدا الطفل مريضاً جداً أو خاملاً\n\n💡 دع الممرض أو الطبيب في المركز يفحص طفلك أولاً وسيقومون بتقديم النصيحة الأنسب.";
-  }
+  if (/احمرار|تورم|انتفاخ|كتلة|swelling|redness/.test(t))
+    return { text: '🔴 التورم والاحمرار حول موضع الحقن شائع وطبيعي ويختفي خلال 3-5 أيام.\n\n🚨 **راجع الطبيب إذا:**\n• انتشر الاحمرار أكثر من 10 سم\n• ظهر صديد أو إفرازات\n• لم يتحسن بعد أسبوع', source: 'منظمة الصحة العالمية (WHO)' };
 
-  if (
-    text.includes('painkiller') ||
-    text.includes('paracetamol') ||
-    text.includes('ibuprofen') ||
-    text.includes('medicine before') ||
-    text.includes('preventative') ||
-    text.includes('مسكن') ||
-    text.includes('باراسيتامول') ||
-    text.includes('ريفو') ||
-    text.includes('أدول') ||
-    text.includes('بندول') ||
-    text.includes('إيبوبروفين') ||
-    text.includes('علاج') ||
-    text.includes('دواء')
-  ) {
-    return "💊 **لا تعطي طفلك مسكنات الألم قبل التطعيم كإجراء وقائي.**\n\nهذه توصية هامة من الهيئات الصحية لطب الأطفال.\n\n**لماذا؟** تشير الدراسات إلى أن إعطاء الباراسيتامول أو الإيبوبروفين *قبل* التطعيم قد يقلل قليلاً من الاستجابة المناعية للجسم تجاه بعض اللقاحات، مما يقلل من فعاليتها.\n\n✅ **ماذا تفعل بدلاً من ذلك:** انتظر وراقب طفلك. إذا أصيب بحمى أو ألم واضح *بعد* التطعيم، يمكنك إعطاؤه الباراسيتامول المخصص لعمره بجرعة تعتمد على وزنه وبتوصية الطبيب.";
-  }
+  if (/حمام|استحمام|يستحم|bath|shower/.test(t))
+    return { text: '🛁 نعم! يمكن تحميم طفلك بعد التطعيم بأمان.\n\n• استخدم ماء فاتر\n• كن لطيفاً عند غسل منطقة الحقن\n• تجنب الفرك الشديد\n\nالحمام الدافئ يساعد في تهدئة طفلك!', source: 'مراكز السيطرة على الأمراض (CDC)' };
 
-  if (
-    text.includes('document') ||
-    text.includes('bring') ||
-    text.includes('booklet') ||
-    text.includes('papers') ||
-    text.includes('id') ||
-    text.includes('وثائق') ||
-    text.includes('أوراق') ||
-    text.includes('دفتر') ||
-    text.includes('هوية') ||
-    text.includes('إثبات')
-  ) {
-    return "📋 **الوثائق المطلوبة لإحضارها لعيادة التطعيم:**\n\n1. **الدفتر الصحي للطفل (الدفتر الورقي الوطني)** — لتسجيل وتوثيق المطاعيم بالأختام الرسمية\n2. **شهادة ميلاد الطفل أو صورة عن الهوية**\n3. **الهوية الشخصية لولي الأمر**\n4. **بطاقة التأمين الصحي** (إن وجدت)\n5. **تطبيق تفلي** — لعرض السجل الرقمي والمتابعة\n\n💡 على الرغم من سهولة استخدام تطبيق تفلي رقمياً، إلا أن الدفتر الورقي ضروري للأختام الرسمية في المراكز الصحية الحكومية.";
-  }
+  if (/فات|نسيت|تأخر|متأخر|missed|delayed|late|فاتني/.test(t))
+    return { text: '⏰ إذا فات موعد لقاح طفلك، لا داعي للقلق!\n\n**المبدأ:** لا تبدأ من الصفر — استمر من حيث توقفت.\n\n• توجه لأقرب مركز صحي حكومي\n• أحضر دفتر تطعيمات الطفل\n• سيحدد الطبيب الجرعة التالية\n\n💡 اللقاحات المتأخرة تعمل بفاعلية حتى بعد موعدها.', source: 'وزارة الصحة الأردنية' };
 
-  if (
-    text.includes('schedule') ||
-    text.includes('when') ||
-    text.includes('next') ||
-    text.includes('age') ||
-    text.includes('months') ||
-    text.includes('جدول') ||
-    text.includes('برنامج') ||
-    text.includes('مواعيد') ||
-    text.includes('متى')
-  ) {
-    return "📅 **أبرز مواعيد جدول التطعيم الوطني الأردني:**\n\n• **عند الولادة:** السل (BCG)، التهاب الكبد البائي (HepB-1)\n• **شهران:** اللقاح السداسي-1، المكورات الرئوية-1، الروتا-1\n• **4 أشهر:** اللقاح السداسي-2، المكورات الرئوية-2، الروتا-2\n• **6 أشهر:** اللقاح السداسي-3، المكورات الرئوية-3\n• **9 أشهر:** الحصبة المفردة\n• **12 شهراً:** الثلاثي الفيروسي-1 (MMR-1)، المكورات السحائية\n• **18 شهراً:** جدري الماء-1\n• **4-6 سنوات:** الثلاثي الفيروسي-2، جدري الماء-2، منشط ثنائي الأطفال\n\nيمكنك الاطلاع على جدول طفلك المخصص بالكامل في صفحة **التقويم** في التطبيق!";
-  }
+  if (/رضاعة|رضاعه|ارضاع|يرضع|breastfeed|حليب الأم/.test(t))
+    return { text: '🍼 الرضاعة الطبيعية والتطعيم يتكاملان!\n\n• تقلل من ألم الحقن وبكاء الطفل\n• حليب الأم يعزز مفعول اللقاح\n• يمكنك إرضاعه أثناء أو بعد الحقن\n\n✅ اللقاحات آمنة تماماً مع الرضاعة.', source: 'منظمة الصحة العالمية (WHO)' };
 
-  if (
-    text.includes('hello') ||
-    text.includes('hi') ||
-    text.includes('hey') ||
-    text.includes('salam') ||
-    text.includes('مرحبا') ||
-    text.includes('أهلاً') ||
-    text.includes('السلام') ||
-    text.includes('سلا')
-  ) {
-    return "👋 أهلاً بك! أنا مساعد تفلي الصحي الذكي للأطفال.\n\nأنا هنا للإجابة على أسئلتك حول:\n• 💉 جداول التطعيمات والإرشادات الوطنية\n• 🤒 التعامل مع الأعراض الجانبية بعد الحقن\n• 📋 الأوراق والوثائق المطلوبة في المواعيد\n• ❓ العناية العامة بالطفل بعد التطعيم\n\nما الذي ترغب في معرفته اليوم؟";
-  }
+  if (/حساسية|تحسس|طفح|حكة|allergy|allergic/.test(t))
+    return { text: '⚠️ ردود الفعل التحسسية الشديدة نادرة جداً.\n\n🚨 **اتصل بالإسعاف فوراً (911) إذا:**\n• صعوبة تنفس أو ابتلاع\n• تورم الوجه أو اللسان\n• شحوب مفاجئ أو فقدان الوعي\n\nهذه الأعراض تظهر خلال 15-30 دقيقة من الحقن.', source: 'منظمة الصحة العالمية (WHO)' };
 
-  if (
-    text.includes('breastfeed') ||
-    text.includes('feed') ||
-    text.includes('eat') ||
-    text.includes('milk') ||
-    text.includes('formula') ||
-    text.includes('رضاعة') ||
-    text.includes('حليب') ||
-    text.includes('رضع') ||
-    text.includes('طعام') ||
-    text.includes('أكل')
-  ) {
-    return "🍼 **الرضاعة والتغذية قبل وبعد التطعيم:**\n\n• **قبل التطعيم:** أطعم طفلك كالمعتاد - لا توجد شروط صيام قبل اللقاحات\n• **أثناء التطعيم:** تسمح بعض المراكز بالرضاعة أثناء الحقن، حيث تساعد على تهدئة الطفل بشكل كبير!\n• **بعد التطعيم:** قدم لطفلك رضعات إضافية. عملية المص تعد مسكناً طبيعياً ممتازاً للألم ومصدراً للطمأنينة.\n\nالترطيب الجيد بعد التطعيم مهم جداً للمساعدة في خفض أي حمى خفيفة.";
-  }
+  if (/مجاناً|مجانية|مجان|سعر|كلفة|حكومي|مركز صحي|free|cost/.test(t))
+    return { text: '🏥 جميع لقاحات الجدول الوطني الأردني مجانية!\n\n**أين:** مراكز الرعاية الأولية لوزارة الصحة، مستشفيات حكومية\n\n**المجانية:** BCG، HepB، السداسي، PCV13، الحصبة، MMR\n\n💡 الروتا وجدري الماء في العيادات الخاصة.', source: 'وزارة الصحة الأردنية' };
 
-  if (
-    text.includes('sleep') ||
-    text.includes('sleepy') ||
-    text.includes('tired') ||
-    text.includes('drowsy') ||
-    text.includes('نوم') ||
-    text.includes('ينام') ||
-    text.includes('خمول') ||
-    text.includes('تعب') ||
-    text.includes('نعاس')
-  ) {
-    return "😴 زيادة النوم بعد التطعيم أمر **طبيعي تماماً** بل وهو علامة جيدة تدل على أن جهاز طفلك المناعي يعمل بجد ويستجيب للقاح!\n\n**ما المتوقع:**\n• قد ينام الطفل أكثر من المعتاد لمدة يوم أو يومين\n• قد يكون سريع الانفعال أو أقل رغبة في الرضاعة لفترة وجيزة\n• تزول هذه الأعراض من تلقاء نفسها\n\n✅ **افعل:** دعه يرتاح وينام بقدر ما يحتاج\n\n⚠️ **استشر الطبيب إذا:** كان من الصعب جداً إيقاظ الطفل، أو رفض الرضاعة تماماً، أو بكى بكاءً متواصلاً بنبرة حادة ولفترات طويلة.";
-  }
+  if (/جدول|برنامج|مواعيد|متى|schedule/.test(t))
+    return { text: '📅 **جدول التطعيم الوطني الأردني:**\n\n• **الولادة:** BCG + HepB-1\n• **شهران:** سداسي-1 + PCV13-1 + روتا-1\n• **4 أشهر:** سداسي-2 + PCV13-2 + روتا-2\n• **6 أشهر:** سداسي-3 + PCV13-3\n• **9 أشهر:** حصبة مفردة\n• **12 شهراً:** MMR-1 + مكورات سحائية\n• **18 شهراً:** جدري الماء\n\nجدول طفلك المخصص موجود في صفحة **التقويم** بالتطبيق!', source: 'وزارة الصحة الأردنية' };
 
-  return "🌿 شكراً لسؤالك! بينما أبذل قصارى جهدي لتوفير إرشادات عامة حول تطعيمات الأطفال بناءً على الجداول الصحية المعتمدة، فإنني أنصح دائماً باستشارة طبيب الأطفال الخاص بك أو زيارة مركز صحي معتمد للحصول على نصيحة طبية مخصصة.\n\n**يمكنني مساعدتك في الإجابة على أسئلة حول:**\n• الحمى، الاحمرار، التورم، البكاء بعد اللقاح\n• رعاية الطفل قبل وبعد التطعيم\n• جدول التطعيمات الوطني الأردني\n• الوثائق المطلوبة في المراكز الصحية\n\nحاول سؤالي عن شيء محدد مثل: *\"ماذا أفعل إذا أصيب طفلي بحمى؟\"*";
+  if (/مسكن|باراسيتامول|أدول|بندول|إيبوبروفين|painkiller|paracetamol/.test(t))
+    return { text: '💊 **لا تعطِ مسكنات ألم قبل التطعيم وقاية.**\n\nالباراسيتامول قبل اللقاح قد يضعف الاستجابة المناعية.\n\n✅ **بعد التطعيم فقط:** إذا ظهرت حمى أو ألم، يمكن إعطاء الباراسيتامول بجرعة حسب الوزن وبتوجيه الطبيب.', source: 'منظمة الصحة العالمية (WHO)' };
+
+  if (/وثائق|أوراق|دفتر|هوية|document|booklet|شهادة ميلاد/.test(t))
+    return { text: '📋 **ما تحتاجه لموعد التطعيم:**\n\n1. دفتر تطعيم الطفل الوطني\n2. شهادة ميلاد الطفل\n3. هوية ولي الأمر\n4. بطاقة التأمين الصحي (إن وجدت)\n5. تطبيق طفلي للسجل الرقمي', source: 'وزارة الصحة الأردنية' };
+
+  if (/bcg|بسج|لقاح السل|السل/.test(t))
+    return { text: '💉 **لقاح السل (BCG):**\n\n• **متى:** عند الولادة\n• **يحمي من:** التهاب السحايا السلّي والسل المنتشر\n• **الأثر:** ندبة صغيرة في الكتف — طبيعي\n• **مجاني:** في جميع المراكز الحكومية', source: 'وزارة الصحة الأردنية' };
+
+  if (/mmr|حصبة|نكاف|الحصبة الألمانية/.test(t))
+    return { text: '💉 **لقاح MMR (الثلاثي الفيروسي):**\n\n• **يحمي من:** الحصبة + النكاف + الحصبة الألمانية\n• **الجرعة الأولى:** عمر 12 شهراً\n• **الفعالية:** 97٪ ضد الحصبة\n• **أعراض بعد 7-12 يوم:** حمى خفيفة وطفح عابر — طبيعي', source: 'مراكز السيطرة على الأمراض (CDC)' };
+
+  if (/سداسي|دفتيريا|تيتانوس|سعال ديكي|شلل أطفال|dtp|hexavalent/.test(t))
+    return { text: '💉 **اللقاح السداسي:**\n\n**يحمي من 6 أمراض:** الدفتيريا، التيتانوس، السعال الديكي، شلل الأطفال، Hib، التهاب الكبد B\n\n**مواعيده:** شهرين، 4 أشهر، 6 أشهر\n\n**الآثار الشائعة:** حمى خفيفة وتورم موضع الحقن — تختفي خلال 48 ساعة.', source: 'وزارة الصحة الأردنية' };
+
+  if (/pcv|مكورات رئوية|رئوي|pneumo/.test(t))
+    return { text: '💉 **لقاح المكورات الرئوية (PCV13):**\n\n• **يحمي من:** الالتهاب الرئوي والتهاب السحايا البكتيري\n• **مواعيده:** شهرين، 4 أشهر، 6 أشهر\n• **مجاني:** في المراكز الحكومية', source: 'وزارة الصحة الأردنية' };
+
+  if (/روتا|rotavirus|إسهال/.test(t))
+    return { text: '💊 **لقاح الروتا:**\n\n• **نوعه:** قطرات فموية (وليس حقنة!)\n• **يحمي من:** الإسهال الشديد عند الرضّع\n• **مواعيده:** شهرين، 4 أشهر\n• ⚠️ الجرعة الأولى قبل 15 أسبوعاً كحد أقصى\n• **متوفر:** في المستشفيات الخاصة', source: 'وزارة الصحة الأردنية' };
+
+  if (/varicella|جدري الماء|عنقز|جديري/.test(t))
+    return { text: '💉 **لقاح جدري الماء (Varicella):**\n\n• **متى:** 18 شهراً\n• **يحمي من:** مرض جدري الماء الفيروسي\n• **متوفر:** في المستشفيات والعيادات الخاصة', source: 'مراكز السيطرة على الأمراض (CDC)' };
+
+  if (/كبد|هيباتيتس|hepatitis|hepb/.test(t))
+    return { text: '💉 **لقاح التهاب الكبد البائي (HepB):**\n\n• **الجرعة الأولى:** خلال 24 ساعة من الولادة\n• **يحمي من:** التهاب الكبد B المزمن وتشمع الكبد\n• **مجاني:** في جميع المراكز الحكومية', source: 'وزارة الصحة الأردنية' };
+
+  if (/خديج|مبتسر|premature|preterm|ناقص شهور/.test(t))
+    return { text: '👶 الأطفال الخدج يحتاجون التطعيم بنفس القدر!\n\n• المواعيد تُحسب من **تاريخ الولادة الفعلي**\n• الجدول يبدأ مباشرة بعد الولادة\n\n💡 تحدث مع طبيب الأطفال لخطة مخصصة.', source: 'منظمة الصحة العالمية (WHO)' };
+
+  if (/طوارئ|خطر|إسعاف|خطير|عاجل|emergency|911/.test(t))
+    return { text: '🚨 **علامات الخطر — اتصل بالإسعاف (911) فوراً:**\n\n• صعوبة في التنفس أو الابتلاع\n• تورم الوجه أو اللسان\n• شحوب شديد أو زرقة\n• فقدان الوعي أو نوبة تشنج', source: 'وزارة الصحة الأردنية' };
+
+  if (/مناعة|immunity|كيف يعمل|لماذا اللقاح|فاعلية|أهمية التطعيم/.test(t))
+    return { text: '🛡️ **كيف تعمل اللقاحات؟**\n\nاللقاح يُدخل نسخة ضعيفة من الجرثوم، فيتعلم الجهاز المناعي:\n1. التعرف على العدو\n2. بناء أجسام مضادة\n3. تذكّره دائماً\n\n💡 الحمى الخفيفة بعد اللقاح = الجهاز المناعي يعمل!', source: 'مراكز السيطرة على الأمراض (CDC)' };
+
+  if (/توأم|توأمين|twins/.test(t))
+    return { text: '👶👶 **تطعيم التوائم:**\n\nكل طفل يأخذ جرعته الكاملة بشكل مستقل — حتى المتطابقة.\n\n• في نفس الموعد\n• جرعات منفصلة لكل واحد\n• أماكن حقن مختلفة عند تعدد اللقاحات', source: 'منظمة الصحة العالمية (WHO)' };
+
+  if (/أعراض جانبية|آثار جانبية|مضاعفات|side effects/.test(t))
+    return { text: '📋 **الآثار الجانبية الشائعة (طبيعية، تختفي خلال 1-3 أيام):**\n\n• 🌡️ حمى خفيفة\n• 🔴 احمرار وتورم موضع الحقن\n• 😢 بكاء وعصبية\n• 😴 نعاس وفقدان شهية\n\n**نادرة (راجع الطبيب):** حمى فوق 39°م أو بكاء أكثر من 3 ساعات\n\n🚨 **طوارئ:** صعوبة تنفس أو تورم وجه — اتصل 911', source: 'منظمة الصحة العالمية (WHO)' };
+
+  if (/سفر|travel|خارج الأردن|حج|عمرة/.test(t))
+    return { text: '✈️ **لقاحات السفر للأطفال:**\n\nأكمل اللقاحات الأساسية أولاً. قد تحتاج إضافياً:\n• الحمى الصفراء (أفريقيا، أمريكا الجنوبية)\n• التيفوئيد (بعض الدول النامية)\n• التهاب الكبد A\n\n💡 استشر طبيب الأطفال قبل 4-6 أسابيع من السفر.', source: 'منظمة الصحة العالمية (WHO)' };
+
+  if (/رشح|زكام|كحة|سعال|cold|cough/.test(t))
+    return { text: '🤧 **هل يمكن تطعيم طفل مريض؟**\n\n✅ **يمكن التطعيم مع:** رشح خفيف، سعال بسيط، حرارة أقل من 38°م\n\n⏸️ **أجّل إذا:** مرض شديد أو حرارة فوق 38°م أو طفل خامل جداً\n\n💡 الطاقم الطبي سيفحصه ويقرر.', source: 'وزارة الصحة الأردنية' };
+
+  // Fallback
+  return {
+    text: 'عذراً، لم أجد إجابة محددة لسؤالك في قاعدة بياناتي حالياً.\n\nللحصول على إجابة دقيقة:\n• أعد صياغة سؤالك بكلمات مختلفة\n• زر أقرب مركز صحي لوزارة الصحة الأردنية\n• اتصل بطبيب أطفال مرخص',
+    source: 'unverified'
+  };
 };
 
+
 export const ChatbotPage: React.FC = () => {
-  const { currentUser } = useVaccineStore();
+  const { faqs, children, selectedChildId } = useVaccineStore();
+  const selectedChild = children.find(c => c.id === selectedChildId) || children[0];
+  const childAgeMonths = selectedChild
+    ? Math.floor((Date.now() - new Date(selectedChild.dateOfBirth).getTime()) / (1000 * 60 * 60 * 24 * 30.4375))
+    : undefined;
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '0',
       sender: 'ai',
-      text: `👋 مرحباً${currentUser ? '، ' + currentUser.name.split(' ')[0] : ''}! أنا **مساعد تفلي الذكي**.\n\nيمكنني الإجابة على أسئلتك حول مواعيد اللقاحات، التعامل مع الأعراض الجانبية، رعاية طفلك قبل وبعد الحقن، والمزيد. كيف يمكنني مساعدتك اليوم؟`,
+      text: `مرحباً بك! أنا المساعدة لينا، مساعدتك الذكية المتخصصة في التطعيمات لدى الأطفال — مدعومة بتقنية الذكاء الاصطناعي المتوافقة مع إرشادات وزارة الصحة الأردنية. يمكنني الإجابة على أسئلتك حول جداول التطعيم، الأعراض الجانبية، والعناية بطفلك. كيف يمكنني مساعدتك اليوم؟`,
       timestamp: new Date(),
+      source: 'ذكاء اصطناعي · Dr. Lena',
+      isAI: true,
     },
   ]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [aiOnline, setAiOnline] = useState<boolean | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Check if AI server is reachable
+  useEffect(() => {
+    fetch(`${AI_API_URL}/api/health`)
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.groq_configured) {
+          setAiOnline(true);
+        } else {
+          setAiOnline(false);
+        }
+      })
+      .catch(() => setAiOnline(false));
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -205,7 +169,7 @@ export const ChatbotPage: React.FC = () => {
     scrollToBottom();
   }, [messages, isTyping]);
 
-  const sendMessage = (text: string) => {
+  const sendMessage = async (text: string) => {
     if (!text.trim()) return;
 
     const userMsg: Message = {
@@ -219,16 +183,51 @@ export const ChatbotPage: React.FC = () => {
     setInputValue('');
     setIsTyping(true);
 
-    // Simulate realistic typing delay based on response length
-    const response = getAIResponse(text.trim());
-    const delay = Math.min(800 + response.length * 1.5, 2500);
+    try {
+      // 1. Try the backend AI endpoint
+      const res = await fetch(`${AI_API_URL}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text.trim(),
+          child_age_months: childAgeMonths,
+          language: 'ar',
+        }),
+        signal: AbortSignal.timeout(12000),
+      });
 
+      if (res.ok) {
+        const data = await res.json();
+        setAiOnline(data.source === 'groq-ai');
+        const aiMsg: Message = {
+          id: `a-${Date.now()}`,
+          sender: 'ai',
+          text: data.message,
+          timestamp: new Date(),
+          source: data.source === 'groq-ai' ? 'ذكاء اصطناعي · Dr. Lena' : 'وزارة الصحة الأردنية',
+          urgency: data.urgency,
+          recommendation: data.recommendation,
+          isAI: data.source === 'groq-ai',
+        };
+        setMessages((prev) => [...prev, aiMsg]);
+        setIsTyping(false);
+        return;
+      }
+    } catch {
+      setAiOnline(false);
+    }
+
+    // 2. Fallback to local rule-based response
+    const { text: responseText, source: responseSource } = getAIResponse(text.trim(), faqs);
+    const delay = Math.min(800 + responseText.length * 1.5, 2000);
     setTimeout(() => {
       const aiMsg: Message = {
         id: `a-${Date.now()}`,
         sender: 'ai',
-        text: response,
+        text: responseText,
         timestamp: new Date(),
+        source: responseSource,
+        isAI: false,
       };
       setMessages((prev) => [...prev, aiMsg]);
       setIsTyping(false);
@@ -247,17 +246,16 @@ export const ChatbotPage: React.FC = () => {
         sender: 'ai',
         text: `تم مسح المحادثة! كيف يمكنني مساعدتك اليوم؟`,
         timestamp: new Date(),
+        source: 'وزارة الصحة الأردنية'
       },
     ]);
   };
 
-  // Render message text with simple markdown-like formatting
   const renderText = (text: string) => {
     return text.split('\n').map((line, i) => {
-      // Bold text
       const parts = line.split(/\*\*(.*?)\*\*/g);
       return (
-        <p key={i} className={line === '' ? 'h-2' : 'leading-relaxed'}>
+        <p key={i} className={line === '' ? 'h-2' : 'leading-relaxed text-right'}>
           {parts.map((part, j) =>
             j % 2 === 1 ? (
               <strong key={j} className="font-bold">
@@ -277,31 +275,27 @@ export const ChatbotPage: React.FC = () => {
 
   return (
     <div className="flex-1 flex flex-col h-screen md:h-auto md:min-h-[calc(100vh-0px)] animate-fade-in pb-16 md:pb-0">
-      {/* Page Header */}
+      {/* Header */}
       <div className="bg-white border-b border-[#BAC8B1]/30 px-4 md:px-8 py-4 flex items-center justify-between flex-shrink-0 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#7B9669] to-[#6C8480] flex items-center justify-center shadow-md shadow-[#7B9669]/20">
             <Sparkles size={18} className="text-white" />
           </div>
-          <div>
-            <h2 className="font-extrabold text-[#404E3B] text-base leading-none">مساعد تفلي الذكي</h2>
-            <p className="text-[11px] text-[#6C8480] font-semibold flex items-center gap-1 mt-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-              إرشادات حول تطعيمات الأطفال
-            </p>
+          <div className="text-right">
+            <h2 className="font-extrabold text-[#404E3B] text-base leading-none">المساعدة لينا · مساعد طفلي الذكي</h2>
           </div>
         </div>
         <button
           onClick={clearChat}
           className="flex items-center gap-1.5 text-xs font-semibold text-[#6C8480] hover:text-[#404E3B] bg-[#BAC8B1]/20 hover:bg-[#BAC8B1]/30 px-3 py-2 rounded-xl transition-all"
         >
-          <RefreshCw size={13} /> مسح المحادثة
+          <RefreshCw size={13} /> مسح
         </button>
       </div>
 
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-        {/* Suggested Questions sidebar (desktop) */}
-        <aside className="md:w-72 bg-white border-l border-[#BAC8B1]/30 flex-shrink-0 overflow-y-auto md:block hidden">
+        {/* Suggested Questions (Desktop) */}
+        <aside className="md:w-72 bg-white border-l border-[#BAC8B1]/30 flex-shrink-0 overflow-y-auto md:block hidden text-right">
           <div className="p-5">
             <p className="text-[10px] font-bold text-[#6C8480] uppercase tracking-widest mb-4">أسئلة مقترحة</p>
             <div className="space-y-2">
@@ -316,10 +310,9 @@ export const ChatbotPage: React.FC = () => {
               ))}
             </div>
 
-            {/* Disclaimer */}
             <div className="mt-6 bg-amber-50 border border-amber-200/60 rounded-2xl p-4">
               <p className="text-[10px] text-amber-700 font-semibold leading-relaxed">
-                ⚠️ يقدم هذا المساعد إرشادات عامة فقط. استشر دائماً طبيب أطفال مرخص للقرارات الطبية.
+                ⚠️ يقدم هذا المساعد إرشادات عامة فقط بناءً على المراجع الطبية. استشر دائماً طبيب أطفال مرخص للقرارات التشخيصية والطبية.
               </p>
             </div>
           </div>
@@ -327,7 +320,7 @@ export const ChatbotPage: React.FC = () => {
 
         {/* Chat Area */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Mobile: Suggested Questions horizontal scroll */}
+          {/* Mobile: Suggested Questions */}
           <div className="md:hidden px-4 py-3 border-b border-[#BAC8B1]/20 bg-white flex-shrink-0">
             <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
               {SUGGESTED_QUESTIONS.map((q) => (
@@ -342,7 +335,7 @@ export const ChatbotPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Messages */}
+          {/* Messages Container */}
           <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 bg-gray-50/50">
             {messages.map((msg) => (
               <div
@@ -358,14 +351,60 @@ export const ChatbotPage: React.FC = () => {
                 </div>
 
                 {/* Bubble */}
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1 w-full text-right">
                   <div
-                    className={`px-4 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.sender === 'user'
-                        ? 'bg-[#404E3B] text-white rounded-tl-none'
-                        : 'bg-white text-[#404E3B] border border-[#BAC8B1]/20 rounded-tr-none'
+                    className={`px-4 py-3 rounded-3xl text-sm leading-relaxed shadow-sm ${msg.sender === 'user'
+                        ? 'bg-[#404E3B] text-white rounded-tl-none text-right'
+                        : 'bg-white text-[#404E3B] border border-[#BAC8B1]/20 rounded-tr-none text-right'
                       }`}
                   >
                     <div className="space-y-1">{renderText(msg.text)}</div>
+
+                    {/* AI Meta: urgency + recommendation + source */}
+                    {msg.sender === 'ai' && (
+                      <div className="mt-2.5 pt-2 border-t border-[#BAC8B1]/10 space-y-1.5">
+                        {/* Urgency badge */}
+                        {msg.urgency && (
+                          <div className="flex justify-start">
+                            {msg.urgency === 'high' ? (
+                              <span className="bg-red-50 text-red-700 border border-red-200 text-[9px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                                <AlertTriangle size={9} /> أولوية عالية
+                              </span>
+                            ) : msg.urgency === 'medium' ? (
+                              <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                                <Info size={9} /> أولوية متوسطة
+                              </span>
+                            ) : (
+                              <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                                <Zap size={9} /> معلوماتي
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {/* Recommendation */}
+                        {msg.recommendation && (
+                          <p className="text-[10px] text-[#6C8480] font-semibold bg-[#BAC8B1]/10 px-2.5 py-1.5 rounded-lg text-right leading-relaxed">
+                            💡 {msg.recommendation}
+                          </p>
+                        )}
+                        {/* Source badge */}
+                        <div className="flex justify-start">
+                          {msg.isAI ? (
+                            <span className="bg-purple-50 text-purple-700 border border-purple-200 text-[9px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                              🤖 {msg.source || 'ذكاء اصطناعي · Dr. Lena'}
+                            </span>
+                          ) : msg.source && msg.source !== 'unverified' ? (
+                            <span className="bg-green-50 text-green-700 border border-green-200 text-[9px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                              🛡️ {msg.source}
+                            </span>
+                          ) : (
+                            <span className="bg-red-50 text-red-700 border border-red-200 text-[9px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                              ⚠️ إجابة استرشادية
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <span className={`text-[10px] font-semibold text-[#6C8480]/70 ${msg.sender === 'user' ? 'text-left' : 'text-right'} px-1`}>
                     {formatTime(msg.timestamp)}
@@ -402,7 +441,7 @@ export const ChatbotPage: React.FC = () => {
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   disabled={isTyping}
-                  className="w-full bg-[#E6E6E6]/60 border border-[#BAC8B1]/40 rounded-2xl px-5 py-3.5 pl-12 text-sm text-[#404E3B] font-medium focus:outline-none focus:border-[#7B9669] focus:bg-white transition-all placeholder:text-[#6C8480]/60 disabled:opacity-50"
+                  className="w-full bg-[#E6E6E6]/60 border border-[#BAC8B1]/40 rounded-2xl px-5 py-3.5 pl-12 text-sm text-[#404E3B] font-medium focus:outline-none focus:border-[#7B9669] focus:bg-white transition-all placeholder:text-[#6C8480]/60 disabled:opacity-50 text-right"
                 />
                 {inputValue && (
                   <button
@@ -423,7 +462,7 @@ export const ChatbotPage: React.FC = () => {
               </button>
             </form>
             <p className="text-[10px] text-[#6C8480]/70 text-center mt-2 font-medium">
-              إرشادات عامة فقط · ليس بديلاً عن الاستشارة الطبية
+              🤖 إرشادات عامة فقط - يرجى استشارة طبيبك في الحالات الطارئة
             </p>
           </div>
         </div>

@@ -47,4 +47,14 @@ router.patch(
   childVaccineController.updateChildVaccineStatus
 );
 
+// @PATCH /api/child-vaccines/:id/reschedule - Reschedule a vaccine with safe-window validation
+router.patch(
+  '/:id/reschedule',
+  [
+    body('newDate').isDate().withMessage('يرجى إدخال تاريخ مجدول صحيح بصيغة YYYY-MM-DD.'),
+    validate,
+  ],
+  childVaccineController.rescheduleVaccine
+);
+
 module.exports = router;

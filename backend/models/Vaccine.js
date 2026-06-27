@@ -33,6 +33,25 @@ module.exports = (sequelize) => {
         min: 1,
       },
     },
+    availability: {
+      type: DataTypes.ENUM('Government', 'Private', 'Both'),
+      defaultValue: 'Both',
+      allowNull: false,
+    },
+    intervalRules: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
+    safeWindowStartDays: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
+      allowNull: false,
+    },
+    safeWindowEndDays: {
+      type: DataTypes.INTEGER,
+      defaultValue: 30,
+      allowNull: false,
+    },
   }, {
     tableName: 'vaccines',
     timestamps: true,
@@ -44,6 +63,14 @@ module.exports = (sequelize) => {
       foreignKey: 'vaccineId',
       as: 'childVaccines',
       onDelete: 'CASCADE',
+    });
+
+    // A vaccine is available at many hospitals (many-to-many)
+    Vaccine.belongsToMany(models.Hospital, {
+      through: models.HospitalVaccine,
+      foreignKey: 'vaccineId',
+      otherKey: 'hospitalId',
+      as: 'hospitals',
     });
   };
 

@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const { User, PasswordResetToken } = require('../models');
+const { sequelize, User, PasswordResetToken, Child, Vaccine, ChildVaccine } = require('../models');
 const { sendPasswordResetEmail } = require('../services/mailService');
 const { Op } = require('sequelize');
 
@@ -15,7 +15,14 @@ const signToken = (id) => {
 // Register Parent User
 exports.register = async (req, res, next) => {
   try {
-    const { fullName, email, password, phone } = req.body;
+    const { fullName, email, password, phone, childName, birthDate, gender } = req.body;
+
+    if (!email || !password || !childName) {
+      return res.status(400).json({
+        success: false,
+        message: 'يرجى تقديم البريد الإلكتروني وكلمة المرور واسم الطفل.',
+      });
+    }
 
     // Check if user already exists
     const existingUser = await User.findOne({ where: { email } });
@@ -30,29 +37,74 @@ exports.register = async (req, res, next) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Create user with role 'Parent'
-    const newUser = await User.create({
-      fullName,
-      email,
-      password: hashedPassword,
-      phone,
-      role: 'Parent',
+    // Create user and child in a transaction
+    const result = await sequelize.transaction(async (t) => {
+      const newUser = await User.create({
+        fullName: fullName || 'ولي أمر',
+        email,
+        password: hashedPassword,
+        phone: phone || null,
+        role: 'Parent',
+      }, { transaction: t });
+
+      const child = await Child.create({
+        parentId: newUser.id,
+        firstName: childName,
+        lastName: fullName ? fullName.split(' ').slice(1).join(' ') || 'الأحمد' : 'الأحمد',
+        gender: gender || 'Male',
+        birthDate: birthDate || new Date().toISOString().split('T')[0],
+      }, { transaction: t });
+
+      // Generate vaccine schedule for the child
+      const allVaccines = await Vaccine.findAll({ transaction: t });
+      const todayStr = new Date().toISOString().split('T')[0];
+      
+      const childVaccineSchedules = allVaccines.map((vaccine) => {
+        const date = new Date(child.birthDate);
+        date.setMonth(date.getMonth() + vaccine.recommendedAgeMonths);
+        const scheduledDate = date.toISOString().split('T')[0];
+        
+        let status = 'Upcoming';
+        if (scheduledDate < todayStr) {
+          status = 'Pending';
+        }
+
+        return {
+          childId: child.id,
+          vaccineId: vaccine.id,
+          scheduledDate,
+          status,
+        };
+      });
+
+      if (childVaccineSchedules.length > 0) {
+        await ChildVaccine.bulkCreate(childVaccineSchedules, { transaction: t });
+      }
+
+      return { newUser, child };
     });
 
     // Generate JWT token
-    const token = signToken(newUser.id);
+    const token = signToken(result.newUser.id);
 
     return res.status(201).json({
       success: true,
-      message: 'تم إنشاء الحساب بنجاح.',
+      message: 'تم إنشاء الحساب وتثبيت جدول التطعيمات بنجاح.',
       token,
       user: {
-        id: newUser.id,
-        fullName: newUser.fullName,
-        email: newUser.email,
-        phone: newUser.phone,
-        role: newUser.role,
+        id: result.newUser.id,
+        fullName: result.newUser.fullName,
+        email: result.newUser.email,
+        phone: result.newUser.phone,
+        role: result.newUser.role,
       },
+      child: {
+        id: result.child.id,
+        firstName: result.child.firstName,
+        lastName: result.child.lastName,
+        birthDate: result.child.birthDate,
+        gender: result.child.gender,
+      }
     });
   } catch (error) {
     next(error);

@@ -1,20 +1,62 @@
 import React, { useState } from 'react';
 import { useVaccineStore } from '../store/useVaccineStore';
-import { AlertTriangle, CheckCircle, Clock, Edit3, Save, Activity, Heart } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Clock, Edit3, Save, Activity, Heart, Plus, Calendar, Info, Shield, Check, Mail } from 'lucide-react';
 import type { Vaccine } from '../types';
 import { ChildAvatar } from '../components/ChildAvatar';
 
+// Helpers for date calculations
+const getRecommendedDueDate = (dobStr: string, ageMonths: number) => {
+  const date = new Date(dobStr);
+  date.setMonth(date.getMonth() + ageMonths);
+  return date.toISOString().split('T')[0];
+};
+
+const getRelativeDate = (baseDateStr: string, days: number) => {
+  const date = new Date(baseDateStr);
+  date.setDate(date.getDate() + days);
+  return date.toISOString().split('T')[0];
+};
+
 export const Dashboard: React.FC = () => {
-  const { children, selectedChildId, vaccines, alerts, updateChildStats, toggleVaccineStatus, rescheduleVaccine, dismissAlert } = useVaccineStore();
+  const {
+    children,
+    selectedChildId,
+    setSelectedChildId,
+    vaccines,
+    alerts,
+    updateChildStats,
+    toggleVaccineStatus,
+    rescheduleVaccine,
+    dismissAlert,
+    addChild,
+    triggerTestNotification
+  } = useVaccineStore();
+
   const child = children.find((c) => c.id === selectedChildId) || children[0];
-  const childVaccines = vaccines[child.id] || [];
-  const childAlerts = alerts[child.id] || [];
+  const childVaccines = child ? (vaccines[child.id] || []) : [];
+  const childAlerts = child ? (alerts[child.id] || []) : [];
 
   const [isEditingStats, setIsEditingStats] = useState(false);
-  const [weight, setWeight] = useState(child.weightKg || 0);
-  const [height, setHeight] = useState(child.heightCm || 0);
+  const [weight, setWeight] = useState(child?.weightKg || 0);
+  const [height, setHeight] = useState(child?.heightCm || 0);
+
+  // Modal States
   const [rescheduleVac, setRescheduleVac] = useState<Vaccine | null>(null);
   const [newDate, setNewDate] = useState('');
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null);
+  
+  const [detailVac, setDetailVac] = useState<Vaccine | null>(null);
+  
+  const [isAddChildOpen, setIsAddChildOpen] = useState(false);
+  const [newChildFirstName, setNewChildFirstName] = useState('');
+  const [newChildLastName, setNewChildLastName] = useState('');
+  const [newChildGender, setNewChildGender] = useState<'Male' | 'Female'>('Male');
+  const [newChildBirthDate, setNewChildBirthDate] = useState('');
+  const [isAddingChild, setIsAddingChild] = useState(false);
+
+  // Test notification state
+  const [testNotificationStatus, setTestNotificationStatus] = useState<{ success?: boolean; message?: string } | null>(null);
+  const [isTriggeringTest, setIsTriggeringTest] = useState(false);
 
   const milestones = [
     { label: 'ولادة', months: 0, display: 'عند الولادة' },
@@ -31,64 +73,257 @@ export const Dashboard: React.FC = () => {
     return Math.floor((Date.now() - dob.getTime()) / (1000 * 60 * 60 * 24 * 30.4375));
   };
 
-  const childAgeMonths = getChildAgeMonths(child.dateOfBirth);
+  const childAgeMonths = child ? getChildAgeMonths(child.dateOfBirth) : 0;
   const closestMilestone = milestones.reduce((prev, curr) =>
     Math.abs(curr.months - childAgeMonths) < Math.abs(prev.months - childAgeMonths) ? curr : prev
   );
   const [selectedMilestone, setSelectedMilestone] = useState(closestMilestone.months);
 
   React.useEffect(() => {
-    setWeight(child.weightKg || 0);
-    setHeight(child.heightCm || 0);
-    const newAge = getChildAgeMonths(child.dateOfBirth);
-    const nc = milestones.reduce((prev, curr) =>
-      Math.abs(curr.months - newAge) < Math.abs(prev.months - newAge) ? curr : prev
-    );
-    setSelectedMilestone(nc.months);
+    if (child) {
+      setWeight(child.weightKg || 0);
+      setHeight(child.heightCm || 0);
+      const newAge = getChildAgeMonths(child.dateOfBirth);
+      const nc = milestones.reduce((prev, curr) =>
+        Math.abs(curr.months - newAge) < Math.abs(prev.months - newAge) ? curr : prev
+      );
+      setSelectedMilestone(nc.months);
+    }
   }, [selectedChildId, child]);
+
+  const handleAddChildSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newChildFirstName || !newChildBirthDate) return;
+    
+    setIsAddingChild(true);
+    const success = await addChild({
+      firstName: newChildFirstName.trim(),
+      lastName: newChildLastName.trim() || (child ? child.name.split(' ').slice(1).join(' ') : '') || 'الأحمد',
+      gender: newChildGender,
+      birthDate: newChildBirthDate,
+    });
+
+    setIsAddingChild(false);
+    if (success) {
+      setIsAddChildOpen(false);
+      setNewChildFirstName('');
+      setNewChildLastName('');
+      setNewChildBirthDate('');
+    }
+  };
+
+  if (!child) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-8 bg-[#E6E6E6] text-center relative min-h-screen">
+        <Heart size={60} className="text-[#7B9669] animate-pulse" />
+        <h3 className="text-xl font-bold text-[#404E3B] mt-4">مرحباً بك في طفلي</h3>
+        <p className="text-sm text-[#6C8480] mt-2">لم يتم العثور على أطفال مسجلين. يرجى إضافة طفلك الأول للبدء.</p>
+        <button
+          onClick={() => setIsAddChildOpen(true)}
+          className="mt-6 bg-[#7B9669] hover:bg-[#7B9669]/90 text-white font-bold px-6 py-3 rounded-2xl transition-all flex items-center gap-2 shadow-md"
+        >
+          <Plus size={18} /> إضافة طفلك الأول
+        </button>
+
+        {/* ─── مودال إضافة طفل جديد ─── */}
+        {isAddChildOpen && (
+          <div className="fixed inset-0 bg-[#404E3B]/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#BAC8B1]/30 animate-fade-in text-right">
+              <h3 className="text-lg font-bold text-[#404E3B]">إضافة طفل جديد</h3>
+              <p className="text-xs text-[#6C8480] mt-1">سجل طفلك الجديد لتوليد جدول تطعيماته التلقائي والمعزول.</p>
+              
+              <form onSubmit={handleAddChildSubmit} className="mt-5 space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-[#6C8480] block mb-1.5">الاسم الأول للطفل</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="مثال: يوسف"
+                    value={newChildFirstName}
+                    onChange={(e) => setNewChildFirstName(e.target.value)}
+                    className="w-full bg-[#E6E6E6]/50 border border-[#BAC8B1]/60 text-[#404E3B] rounded-2xl px-4 py-3 focus:outline-none focus:border-[#7B9669] text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <label className="text-xs font-bold text-[#6C8480] block mb-1.5">اسم العائلة</label>
+                  <input
+                    type="text"
+                    placeholder="مثال: الأحمد (اختياري)"
+                    value={newChildLastName}
+                    onChange={(e) => setNewChildLastName(e.target.value)}
+                    className="w-full bg-[#E6E6E6]/50 border border-[#BAC8B1]/60 text-[#404E3B] rounded-2xl px-4 py-3 focus:outline-none focus:border-[#7B9669] text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-[#6C8480] block mb-1.5">الجنس</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setNewChildGender('Male')}
+                      className={`py-2.5 rounded-2xl text-xs font-bold border transition-all ${newChildGender === 'Male' ? 'bg-[#7B9669] text-white border-[#7B9669]' : 'bg-[#E6E6E6]/50 border-[#BAC8B1]/60 text-[#404E3B]'}`}
+                    >
+                      ذكر 👦
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewChildGender('Female')}
+                      className={`py-2.5 rounded-2xl text-xs font-bold border transition-all ${newChildGender === 'Female' ? 'bg-[#7B9669] text-white border-[#7B9669]' : 'bg-[#E6E6E6]/50 border-[#BAC8B1]/60 text-[#404E3B]'}`}
+                    >
+                      أنثى 👧
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-[#6C8480] block mb-1.5">تاريخ الولادة</label>
+                  <input
+                    type="date"
+                    required
+                    value={newChildBirthDate}
+                    onChange={(e) => setNewChildBirthDate(e.target.value)}
+                    className="w-full bg-[#E6E6E6]/50 border border-[#BAC8B1]/60 text-[#404E3B] rounded-2xl px-4 py-3 focus:outline-none focus:border-[#7B9669] text-sm"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddChildOpen(false)}
+                    className="px-4 py-2.5 rounded-2xl bg-[#E6E6E6] hover:bg-[#E6E6E6]/80 text-[#404E3B] font-bold text-xs transition-all"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isAddingChild}
+                    className="px-5 py-2.5 rounded-2xl bg-[#7B9669] hover:bg-[#7B9669]/90 text-white font-bold text-xs transition-all shadow-md shadow-[#7B9669]/10 flex items-center gap-2"
+                  >
+                    {isAddingChild ? 'جاري الإضافة...' : 'حفظ وإضافة'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const completedCount = childVaccines.filter((v) => v.status === 'completed').length;
   const totalCount = childVaccines.length;
   const completionRate = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
   const upcomingCount = childVaccines.filter((v) => v.status === 'upcoming').length;
 
-  const handleSaveStats = () => { updateChildStats(child.id, Number(weight), Number(height)); setIsEditingStats(false); };
-  const handleRescheduleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (rescheduleVac && newDate) { rescheduleVaccine(child.id, rescheduleVac.id, newDate); setRescheduleVac(null); setNewDate(''); }
+  const handleSaveStats = () => {
+    updateChildStats(child.id, Number(weight), Number(height));
+    setIsEditingStats(false);
   };
+
+  const handleRescheduleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (rescheduleVac && newDate) {
+      setRescheduleError(null);
+      
+      // Local Validation
+      const recDueDate = getRecommendedDueDate(child.dateOfBirth, rescheduleVac.targetAgeMonths);
+      const minDate = getRelativeDate(recDueDate, rescheduleVac.safeWindowStartDays || 0);
+      const maxDate = getRelativeDate(recDueDate, rescheduleVac.safeWindowEndDays || 30);
+
+      if (newDate < minDate || newDate > maxDate) {
+        setRescheduleError(`لا يمكن جدولة اللقاح خارج الفترة الآمنة: بين ${minDate} و ${maxDate}.`);
+        return;
+      }
+
+      const res = await rescheduleVaccine(child.id, rescheduleVac.id, newDate);
+      if (res.success) {
+        setRescheduleVac(null);
+        setNewDate('');
+      } else {
+        setRescheduleError(res.message || 'فشلت إعادة الجدولة.');
+      }
+    }
+  };
+
+  const handleTriggerTestNotification = async () => {
+    setIsTriggeringTest(true);
+    setTestNotificationStatus(null);
+    const res = await triggerTestNotification();
+    setIsTriggeringTest(false);
+    setTestNotificationStatus({
+      success: res.success,
+      message: res.message
+    });
+    setTimeout(() => setTestNotificationStatus(null), 5000);
+  };
+
   const currentMilestoneVaccines = childVaccines.filter((v) => v.targetAgeMonths === selectedMilestone);
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 animate-fade-in pb-24 md:pb-8">
-      {/* البانر العلوي */}
+      {/* رأس الصفحة مع محدد الأطفال وزر الإضافة */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/70 backdrop-blur-md rounded-3xl p-4 border border-[#BAC8B1]/30 shadow-sm">
+        <div>
+          <h2 className="text-lg font-bold text-[#404E3B]">مرحباً، {child.name} 👋</h2>
+          <p className="text-xs text-[#6C8480] font-medium mt-0.5">الملف النشط ومسيرة التطعيمات</p>
+        </div>
+
+        <div className="flex items-center gap-2.5 w-full sm:w-auto">
+          {/* محدد الأطفال السريع */}
+          <select
+            value={selectedChildId}
+            onChange={(e) => setSelectedChildId(e.target.value)}
+            className="bg-white border border-[#BAC8B1]/50 text-[#404E3B] font-bold text-xs rounded-2xl px-4 py-2.5 focus:outline-none focus:border-[#7B9669] flex-1 sm:flex-initial"
+          >
+            {children.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+
+          {/* زر إضافة طفل جديد */}
+          <button
+            onClick={() => setIsAddChildOpen(true)}
+            className="bg-[#7B9669] hover:bg-[#7B9669]/90 text-white p-2.5 rounded-2xl transition-all shadow-md shadow-[#7B9669]/10 flex items-center justify-center flex-shrink-0"
+            title="إضافة طفل جديد"
+          >
+            <Plus size={18} />
+          </button>
+        </div>
+      </div>
+
+      {/* البانر الترحيبي */}
       <div className="relative overflow-hidden bg-gradient-to-l from-[#7B9669] to-[#6C8480] rounded-3xl p-6 md:p-8 text-white shadow-lg shadow-[#7B9669]/10">
         <div className="absolute left-0 bottom-0 top-0 opacity-10 flex items-center pointer-events-none pl-8">
           <Heart size={200} />
         </div>
-        <div className="relative z-10 max-w-xl">
+        <div className="relative z-10 max-w-xl text-right">
           <span className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold tracking-wide">
             {child.gender === 'female' ? '👧 ابنة' : '👦 ابن'}
           </span>
           <h2 className="text-2xl md:text-4xl font-extrabold mt-3 tracking-tight leading-tight">
-            مرحباً، أم {child.name.split(' ')[0]}
+            مرحباً بك، {child.name}
           </h2>
           <p className="text-white/80 text-sm md:text-base mt-2 font-medium">
-            تابعي مراحل تطعيم {child.name.split(' ')[0]} وامنحيه بداية صحية وآمنة للحياة.
+            تابعي مراحل تطعيم {child.name.split(' ')[0]} وامنحيه بداية صحية وآمنة للحياة من خلال نظام التتبع الرقمي الذكي.
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* بطاقة الملف الشخصي */}
+        {/* بطاقة النمو والإحصائيات */}
         <div className="bg-white rounded-3xl p-6 border border-[#BAC8B1]/30 shadow-sm flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-4 border-b border-[#BAC8B1]/20">
               <h3 className="font-bold text-lg text-[#404E3B] flex items-center gap-2">
                 <Activity size={18} className="text-[#7B9669]" /> النمو والإحصائيات
               </h3>
-              <button onClick={() => { if (isEditingStats) handleSaveStats(); else setIsEditingStats(true); }}
-                className="text-xs font-semibold text-[#7B9669] hover:text-[#404E3B] transition-colors flex items-center gap-1 bg-[#BAC8B1]/20 px-3 py-1.5 rounded-full">
+              <button
+                onClick={() => { if (isEditingStats) handleSaveStats(); else setIsEditingStats(true); }}
+                className="text-xs font-semibold text-[#7B9669] hover:text-[#404E3B] transition-colors flex items-center gap-1 bg-[#BAC8B1]/20 px-3 py-1.5 rounded-full"
+              >
                 {isEditingStats ? <><Save size={12} /> حفظ</> : <><Edit3 size={12} /> تعديل</>}
               </button>
             </div>
@@ -104,8 +339,13 @@ export const Dashboard: React.FC = () => {
               <div className="bg-[#E6E6E6]/50 rounded-2xl p-4 text-center border border-[#BAC8B1]/10">
                 <span className="text-xs font-bold text-[#6C8480] block">الوزن</span>
                 {isEditingStats ? (
-                  <input type="number" step="0.1" value={weight} onChange={(e) => setWeight(Number(e.target.value))}
-                    className="w-20 text-center font-extrabold text-lg text-[#404E3B] bg-white border border-[#BAC8B1]/60 rounded-lg py-0.5 mt-1 focus:outline-none focus:border-[#7B9669]" />
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={weight}
+                    onChange={(e) => setWeight(Number(e.target.value))}
+                    className="w-20 text-center font-extrabold text-lg text-[#404E3B] bg-white border border-[#BAC8B1]/60 rounded-lg py-0.5 mt-1 focus:outline-none focus:border-[#7B9669]"
+                  />
                 ) : (
                   <span className="text-2xl font-extrabold text-[#404E3B] mt-1 block">{child.weightKg ? `${child.weightKg} كغ` : '--'}</span>
                 )}
@@ -113,20 +353,34 @@ export const Dashboard: React.FC = () => {
               <div className="bg-[#E6E6E6]/50 rounded-2xl p-4 text-center border border-[#BAC8B1]/10">
                 <span className="text-xs font-bold text-[#6C8480] block">الطول</span>
                 {isEditingStats ? (
-                  <input type="number" value={height} onChange={(e) => setHeight(Number(e.target.value))}
-                    className="w-20 text-center font-extrabold text-lg text-[#404E3B] bg-white border border-[#BAC8B1]/60 rounded-lg py-0.5 mt-1 focus:outline-none focus:border-[#7B9669]" />
+                  <input
+                    type="number"
+                    value={height}
+                    onChange={(e) => setHeight(Number(e.target.value))}
+                    className="w-20 text-center font-extrabold text-lg text-[#404E3B] bg-white border border-[#BAC8B1]/60 rounded-lg py-0.5 mt-1 focus:outline-none focus:border-[#7B9669]"
+                  />
                 ) : (
                   <span className="text-2xl font-extrabold text-[#404E3B] mt-1 block">{child.heightCm ? `${child.heightCm} سم` : '--'}</span>
                 )}
               </div>
             </div>
           </div>
-          <div className="bg-[#7B9669]/10 rounded-2xl p-4 mt-6 border border-[#7B9669]/20 flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-white text-[#7B9669] shadow-sm"><CheckCircle size={20} /></div>
-            <div>
-              <p className="text-xs font-bold text-[#6C8480] leading-none">ملخص الدفتر</p>
-              <p className="text-sm font-bold text-[#404E3B] mt-1.5">{completedCount} مكتمل | {upcomingCount} قادم</p>
-            </div>
+          
+          {/* زر التنبيهات التجريبية */}
+          <div className="mt-6 border-t border-[#BAC8B1]/20 pt-6">
+            <button
+              onClick={handleTriggerTestNotification}
+              disabled={isTriggeringTest}
+              className="w-full bg-[#BAC8B1]/20 hover:bg-[#BAC8B1]/40 text-[#404E3B] font-bold text-xs py-3 px-4 rounded-2xl transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Mail size={14} className="text-[#7B9669]" />
+              {isTriggeringTest ? 'جاري إرسال تنبيه تجريبي...' : 'إرسال بريد إلكتروني تجريبي'}
+            </button>
+            {testNotificationStatus && (
+              <p className={`text-[10px] font-bold text-center mt-2 ${testNotificationStatus.success ? 'text-green-600' : 'text-red-500'}`}>
+                {testNotificationStatus.message}
+              </p>
+            )}
           </div>
         </div>
 
@@ -154,7 +408,7 @@ export const Dashboard: React.FC = () => {
                         <div className={`p-2 rounded-xl mt-0.5 h-fit ${alert.type === 'urgent' ? 'bg-red-100 text-red-600' : alert.type === 'warning' ? 'bg-amber-100 text-amber-600' : 'bg-white text-[#7B9669]'}`}>
                           {alert.type === 'urgent' ? <AlertTriangle size={16} /> : <Clock size={16} />}
                         </div>
-                        <div>
+                        <div className="text-right">
                           <h4 className="text-sm font-bold text-[#404E3B]">{alert.title}</h4>
                           <p className="text-xs text-[#6C8480] mt-0.5 leading-relaxed">{alert.message}</p>
                           <span className="text-[10px] text-[#6C8480]/70 font-semibold block mt-1">تاريخ التنبيه: {alert.date}</span>
@@ -163,14 +417,26 @@ export const Dashboard: React.FC = () => {
                       <div className="flex gap-2 self-end sm:self-center w-full sm:w-auto justify-end">
                         {matchingVac && (
                           <>
-                            <button onClick={() => toggleVaccineStatus(child.id, matchingVac.id, 'completed')}
-                              className="text-[11px] font-bold bg-[#7B9669] hover:bg-[#7B9669]/90 text-white px-3 py-1.5 rounded-xl transition-all shadow-sm">إكمال</button>
-                            <button onClick={() => { setRescheduleVac(matchingVac); setNewDate(matchingVac.scheduledDate); }}
-                              className="text-[11px] font-bold bg-[#BAC8B1]/40 hover:bg-[#BAC8B1]/60 text-[#404E3B] px-3 py-1.5 rounded-xl transition-all">إعادة جدولة</button>
+                            <button
+                              onClick={() => toggleVaccineStatus(child.id, matchingVac.id, 'completed')}
+                              className="text-[11px] font-bold bg-[#7B9669] hover:bg-[#7B9669]/90 text-white px-3 py-1.5 rounded-xl transition-all shadow-sm"
+                            >
+                              إكمال
+                            </button>
+                            <button
+                              onClick={() => { setRescheduleVac(matchingVac); setNewDate(matchingVac.scheduledDate); setRescheduleError(null); }}
+                              className="text-[11px] font-bold bg-[#BAC8B1]/40 hover:bg-[#BAC8B1]/60 text-[#404E3B] px-3 py-1.5 rounded-xl transition-all"
+                            >
+                              إعادة جدولة
+                            </button>
                           </>
                         )}
-                        <button onClick={() => dismissAlert(child.id, alert.id)}
-                          className="text-[10px] font-bold text-[#6C8480] hover:text-[#404E3B] px-2 py-1.5 transition-all">تجاهل</button>
+                        <button
+                          onClick={() => dismissAlert(child.id, alert.id)}
+                          className="text-[10px] font-bold text-[#6C8480] hover:text-[#404E3B] px-2 py-1.5 transition-all"
+                        >
+                          تجاهل
+                        </button>
                       </div>
                     </div>
                   );
@@ -179,12 +445,12 @@ export const Dashboard: React.FC = () => {
             )}
           </div>
 
-          {/* شريط التقدم */}
+          {/* شريط التغطية والتقدم */}
           <div className="bg-white rounded-3xl p-6 border border-[#BAC8B1]/30 shadow-sm">
             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-              <div>
+              <div className="text-right">
                 <h3 className="font-bold text-lg text-[#404E3B]">قائمة التغطية التطعيمية</h3>
-                <p className="text-xs text-[#6C8480] mt-0.5">متتبع إكمال برنامج التطعيم الأردني</p>
+                <p className="text-xs text-[#6C8480] mt-0.5">متتبع إكمال برنامج التطعيم الوطني للأطفال</p>
               </div>
               <div className="bg-[#7B9669]/10 border border-[#7B9669]/20 px-3.5 py-1.5 rounded-2xl self-start sm:self-center">
                 <span className="text-sm font-black text-[#7B9669]">{completionRate}% مكتمل</span>
@@ -198,7 +464,7 @@ export const Dashboard: React.FC = () => {
               <span>{totalCount - completedCount} جرعة متبقية</span>
             </div>
 
-            {/* خط الزمني */}
+            {/* خط المراحل الزمنية */}
             <div className="mt-8 relative">
               <div className="absolute top-5 left-4 right-4 h-0.5 bg-[#BAC8B1]/40 -z-10 hidden sm:block" />
               <div className="flex flex-col sm:flex-row justify-between items-center gap-4 sm:gap-0">
@@ -215,7 +481,11 @@ export const Dashboard: React.FC = () => {
                   else if (isCurrent) { nodeBg = 'bg-white border-[#7B9669] ring-4 ring-[#7B9669]/15'; nodeColor = 'text-[#7B9669] font-bold'; }
                   else if (someDone) { nodeBg = 'bg-[#BAC8B1] border-[#BAC8B1] text-white'; nodeColor = 'text-[#6C8480]'; }
                   return (
-                    <button key={m.months} onClick={() => setSelectedMilestone(m.months)} className="flex sm:flex-col items-center gap-3 sm:gap-1.5 focus:outline-none group w-full sm:w-auto">
+                    <button
+                      key={m.months}
+                      onClick={() => setSelectedMilestone(m.months)}
+                      className="flex sm:flex-col items-center gap-3 sm:gap-1.5 focus:outline-none group w-full sm:w-auto"
+                    >
                       <div className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-xs font-bold transition-all duration-300 shadow-sm ${nodeBg} group-hover:scale-110`}>
                         {allDone ? '✓' : hasOverdue ? '!' : m.label}
                       </div>
@@ -229,7 +499,7 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* تطعيمات المرحلة المختارة */}
+            {/* قائمة تطعيمات المرحلة المحددة */}
             <div className="mt-8 bg-[#BAC8B1]/10 rounded-2xl p-5 border border-[#BAC8B1]/20">
               <div className="flex justify-between items-center pb-3 border-b border-[#BAC8B1]/30">
                 <h4 className="font-bold text-sm text-[#404E3B]">
@@ -243,21 +513,39 @@ export const Dashboard: React.FC = () => {
                 <div className="mt-3.5 space-y-3">
                   {currentMilestoneVaccines.map((v) => (
                     <div key={v.id} className="bg-white rounded-xl p-4 border border-[#BAC8B1]/20 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 transition-all duration-200 hover:border-[#7B9669]/30">
-                      <div className="flex items-start gap-3">
-                        <button onClick={() => { toggleVaccineStatus(child.id, v.id, v.status === 'completed' ? 'upcoming' : 'completed'); }}
-                          className={`mt-0.5 rounded-full p-0.5 transition-all focus:outline-none ${v.status === 'completed' ? 'text-[#7B9669]' : v.status === 'overdue' ? 'text-red-500' : 'text-gray-300 hover:text-[#7B9669]'}`}>
+                      <div className="flex items-start gap-3 text-right">
+                        <button
+                          onClick={() => { toggleVaccineStatus(child.id, v.id, v.status === 'completed' ? 'upcoming' : 'completed'); }}
+                          className={`mt-0.5 rounded-full p-0.5 transition-all focus:outline-none ${v.status === 'completed' ? 'text-[#7B9669]' : v.status === 'overdue' ? 'text-red-500' : 'text-gray-300 hover:text-[#7B9669]'}`}
+                        >
                           <CheckCircle size={22} className={v.status === 'completed' ? 'fill-[#7B9669]/10' : ''} />
                         </button>
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-bold text-sm text-[#404E3B]">{v.name}</span>
+                            <button
+                              onClick={() => setDetailVac(v)}
+                              className="font-bold text-sm text-[#404E3B] hover:text-[#7B9669] text-right focus:outline-none hover:underline"
+                            >
+                              {v.name}
+                            </button>
                             <span className="bg-[#BAC8B1]/20 text-[#404E3B] text-[10px] font-bold px-2 py-0.5 rounded-md">{v.code}</span>
                             <span className={`text-[9px] font-black px-2 py-0.5 rounded-md ${
-                              v.status === 'completed' ? 'bg-[#7B9669]/10 text-[#7B9669]' : v.status === 'overdue' ? 'bg-red-50 text-red-500 animate-pulse' : 'bg-amber-50 text-amber-600'
+                              v.status === 'completed' ? 'bg-[#7B9669]/10 text-[#7B9669]' : v.status === 'overdue' ? 'bg-red-50 text-red-500' : 'bg-amber-50 text-amber-600'
                             }`}>{v.status === 'completed' ? 'مكتمل' : v.status === 'overdue' ? 'متأخر' : 'قادم'}</span>
                           </div>
                           <p className="text-xs text-[#6C8480] mt-1.5 leading-relaxed max-w-xl">{v.description}</p>
-                          {v.notes && <p className="text-[11px] text-[#6C8480]/80 italic mt-1 bg-[#BAC8B1]/10 px-2 py-1 rounded border-r-2 border-[#7B9669]/40">ملاحظة: {v.notes}</p>}
+                          
+                          {/* تفاصيل اللقاح السريعة */}
+                          <div className="flex gap-4 mt-2 text-[10px] text-[#6C8480] font-semibold">
+                            <span className="flex items-center gap-1 bg-[#E6E6E6]/50 px-2 py-1 rounded-md">
+                              🏢 التوفر: {v.availability === 'Government' ? 'حكومي' : v.availability === 'Private' ? 'خاص' : 'حكومي وخاص'}
+                            </span>
+                            {v.safeWindowEndDays && (
+                              <span className="flex items-center gap-1 bg-[#E6E6E6]/50 px-2 py-1 rounded-md">
+                                📅 الفترة الآمنة: +{v.safeWindowEndDays} يوم
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <div className="flex flex-row md:flex-col items-center md:items-end justify-between w-full md:w-auto border-t md:border-t-0 border-[#BAC8B1]/10 pt-2.5 md:pt-0">
@@ -266,8 +554,12 @@ export const Dashboard: React.FC = () => {
                           <span className="text-xs font-bold text-[#404E3B]">{v.status === 'completed' ? v.completedDate : v.scheduledDate}</span>
                         </div>
                         {v.status !== 'completed' && (
-                          <button onClick={() => { setRescheduleVac(v); setNewDate(v.scheduledDate); }}
-                            className="text-[11px] font-semibold text-[#7B9669] hover:underline mt-1 bg-[#BAC8B1]/10 hover:bg-[#BAC8B1]/20 px-2 py-1 rounded-md transition-all">إعادة جدولة</button>
+                          <button
+                            onClick={() => { setRescheduleVac(v); setNewDate(v.scheduledDate); setRescheduleError(null); }}
+                            className="text-[11px] font-semibold text-[#7B9669] hover:underline mt-1 bg-[#BAC8B1]/10 hover:bg-[#BAC8B1]/20 px-2 py-1 rounded-md transition-all"
+                          >
+                            إعادة جدولة
+                          </button>
                         )}
                       </div>
                     </div>
@@ -279,25 +571,223 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* نافذة إعادة الجدولة */}
+      {/* ─── مودال إضافة طفل جديد ─── */}
+      {isAddChildOpen && (
+        <div className="fixed inset-0 bg-[#404E3B]/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#BAC8B1]/30 animate-fade-in text-right">
+            <h3 className="text-lg font-bold text-[#404E3B]">إضافة طفل جديد</h3>
+            <p className="text-xs text-[#6C8480] mt-1">سجل طفلك الجديد لتوليد جدول تطعيماته التلقائي والمعزول.</p>
+            
+            <form onSubmit={handleAddChildSubmit} className="mt-5 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-[#6C8480] block mb-1.5">الاسم الأول للطفل</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="مثال: يوسف"
+                  value={newChildFirstName}
+                  onChange={(e) => setNewChildFirstName(e.target.value)}
+                  className="w-full bg-[#E6E6E6]/50 border border-[#BAC8B1]/60 text-[#404E3B] rounded-2xl px-4 py-3 focus:outline-none focus:border-[#7B9669] text-sm"
+                />
+              </div>
+              
+              <div>
+                <label className="text-xs font-bold text-[#6C8480] block mb-1.5">اسم العائلة</label>
+                <input
+                  type="text"
+                  placeholder="مثال: الأحمد (اختياري)"
+                  value={newChildLastName}
+                  onChange={(e) => setNewChildLastName(e.target.value)}
+                  className="w-full bg-[#E6E6E6]/50 border border-[#BAC8B1]/60 text-[#404E3B] rounded-2xl px-4 py-3 focus:outline-none focus:border-[#7B9669] text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-[#6C8480] block mb-1.5">الجنس</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setNewChildGender('Male')}
+                    className={`py-2.5 rounded-2xl text-xs font-bold border transition-all ${newChildGender === 'Male' ? 'bg-[#7B9669] text-white border-[#7B9669]' : 'bg-[#E6E6E6]/50 border-[#BAC8B1]/60 text-[#404E3B]'}`}
+                  >
+                    ذكر 👦
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewChildGender('Female')}
+                    className={`py-2.5 rounded-2xl text-xs font-bold border transition-all ${newChildGender === 'Female' ? 'bg-[#7B9669] text-white border-[#7B9669]' : 'bg-[#E6E6E6]/50 border-[#BAC8B1]/60 text-[#404E3B]'}`}
+                  >
+                    أنثى 👧
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-[#6C8480] block mb-1.5">تاريخ الولادة</label>
+                <input
+                  type="date"
+                  required
+                  value={newChildBirthDate}
+                  onChange={(e) => setNewChildBirthDate(e.target.value)}
+                  className="w-full bg-[#E6E6E6]/50 border border-[#BAC8B1]/60 text-[#404E3B] rounded-2xl px-4 py-3 focus:outline-none focus:border-[#7B9669] text-sm"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setIsAddChildOpen(false)}
+                  className="px-4 py-2.5 rounded-2xl bg-[#E6E6E6] hover:bg-[#E6E6E6]/80 text-[#404E3B] font-bold text-xs transition-all"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isAddingChild}
+                  className="px-5 py-2.5 rounded-2xl bg-[#7B9669] hover:bg-[#7B9669]/90 text-white font-bold text-xs transition-all shadow-md shadow-[#7B9669]/10 flex items-center gap-2"
+                >
+                  {isAddingChild ? 'جاري الإضافة...' : 'حفظ وإضافة'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─── مودال إعادة الجدولة الآمنة ─── */}
       {rescheduleVac && (
         <div className="fixed inset-0 bg-[#404E3B]/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#BAC8B1]/30 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#BAC8B1]/30 animate-fade-in text-right">
             <h3 className="text-lg font-bold text-[#404E3B]">إعادة جدولة موعد التطعيم</h3>
-            <p className="text-xs text-[#6C8480] mt-1">تحديث موعد <strong className="text-[#404E3B]">{rescheduleVac.name}</strong> ({rescheduleVac.code}).</p>
+            <p className="text-xs text-[#6C8480] mt-1">تحديث موعد <strong className="text-[#404E3B]">{rescheduleVac.name}</strong>.</p>
+            
+            {/* عرض نافذة الجدولة الآمنة */}
+            {(() => {
+              const recDueDate = getRecommendedDueDate(child.dateOfBirth, rescheduleVac.targetAgeMonths);
+              const minDate = getRelativeDate(recDueDate, rescheduleVac.safeWindowStartDays || 0);
+              const maxDate = getRelativeDate(recDueDate, rescheduleVac.safeWindowEndDays || 30);
+              return (
+                <div className="bg-[#BAC8B1]/20 border-r-4 border-[#7B9669] p-4 rounded-xl mt-3 text-xs space-y-1">
+                  <p className="font-bold text-[#404E3B]">📅 نافذة الجدولة الآمنة طبياً:</p>
+                  <p className="text-[#6C8480]">بين <strong className="text-[#404E3B]">{minDate}</strong> و <strong className="text-[#404E3B]">{maxDate}</strong></p>
+                  <p className="text-[10px] text-[#6C8480]/80 italic">الموعد الموصى به أصلياً: {recDueDate}</p>
+                </div>
+              );
+            })()}
+
+            {rescheduleError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-semibold p-3.5 rounded-xl mt-3 flex items-start gap-2">
+                <Shield size={14} className="flex-shrink-0 mt-0.5 text-red-500" />
+                <span>{rescheduleError}</span>
+              </div>
+            )}
+
             <form onSubmit={handleRescheduleSubmit} className="mt-5 space-y-4">
               <div>
                 <label className="text-xs font-bold text-[#6C8480] block mb-1.5">التاريخ الجديد</label>
-                <input type="date" required value={newDate} onChange={(e) => setNewDate(e.target.value)}
-                  className="w-full bg-[#E6E6E6]/50 border border-[#BAC8B1]/60 text-[#404E3B] rounded-2xl px-4 py-3 focus:outline-none focus:border-[#7B9669] text-sm" />
+                <input
+                  type="date"
+                  required
+                  value={newDate}
+                  onChange={(e) => setNewDate(e.target.value)}
+                  className="w-full bg-[#E6E6E6]/50 border border-[#BAC8B1]/60 text-[#404E3B] rounded-2xl px-4 py-3 focus:outline-none focus:border-[#7B9669] text-sm"
+                />
               </div>
-              <div className="flex justify-end gap-3.5 pt-4">
-                <button type="button" onClick={() => setRescheduleVac(null)}
-                  className="px-4 py-2.5 rounded-2xl bg-[#E6E6E6] hover:bg-[#E6E6E6]/80 text-[#404E3B] font-bold text-xs transition-all">إلغاء</button>
-                <button type="submit"
-                  className="px-5 py-2.5 rounded-2xl bg-[#7B9669] hover:bg-[#7B9669]/90 text-white font-bold text-xs transition-all shadow-md shadow-[#7B9669]/10">حفظ الموعد</button>
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setRescheduleVac(null)}
+                  className="px-4 py-2.5 rounded-2xl bg-[#E6E6E6] hover:bg-[#E6E6E6]/80 text-[#404E3B] font-bold text-xs transition-all"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-2xl bg-[#7B9669] hover:bg-[#7B9669]/90 text-white font-bold text-xs transition-all shadow-md shadow-[#7B9669]/10"
+                >
+                  حفظ الموعد
+                </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─── مودال تفاصيل التطعيم ─── */}
+      {detailVac && (
+        <div className="fixed inset-0 bg-[#404E3B]/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-[#BAC8B1]/30 animate-fade-in text-right">
+            <div className="flex justify-between items-start pb-4 border-b border-[#BAC8B1]/20">
+              <button
+                onClick={() => setDetailVac(null)}
+                className="text-xs font-bold bg-[#E6E6E6] hover:bg-[#E6E6E6]/80 text-[#404E3B] px-3 py-1.5 rounded-xl transition-all"
+              >
+                إغلاق
+              </button>
+              <div>
+                <h3 className="text-lg font-black text-[#404E3B]">{detailVac.name}</h3>
+                <span className="bg-[#BAC8B1]/20 text-[#404E3B] text-[10px] font-black px-2 py-0.5 rounded-md mt-1 inline-block">{detailVac.code}</span>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-4 text-sm leading-relaxed">
+              <div>
+                <h4 className="font-bold text-xs text-[#6C8480]">وصف التطعيم والغرض الطبي منه</h4>
+                <p className="text-[#404E3B] mt-1 text-xs md:text-sm">{detailVac.description}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-[#E6E6E6]/30 p-3.5 rounded-2xl border border-[#BAC8B1]/20">
+                  <h4 className="font-bold text-[10px] text-[#6C8480]">العمر الموصى به</h4>
+                  <p className="font-black text-sm text-[#404E3B] mt-1">{detailVac.ageGroup}</p>
+                </div>
+                <div className="bg-[#E6E6E6]/30 p-3.5 rounded-2xl border border-[#BAC8B1]/20">
+                  <h4 className="font-bold text-[10px] text-[#6C8480]">أماكن التوفر في الأردن</h4>
+                  <p className="font-black text-sm text-[#404E3B] mt-1">
+                    {detailVac.availability === 'Government' ? 'المراكز الصحية الحكومية' : detailVac.availability === 'Private' ? 'القطاع الخاص' : 'القطاع الحكومي والخاص'}
+                  </p>
+                </div>
+              </div>
+
+              {detailVac.intervalRules && (
+                <div>
+                  <h4 className="font-bold text-xs text-[#6C8480]">قواعد الجرعات والفواصل الطبية</h4>
+                  <p className="text-[#404E3B] mt-1 text-xs bg-amber-50 border border-amber-200/50 p-3 rounded-xl text-amber-900 leading-normal">
+                    💡 {detailVac.intervalRules}
+                  </p>
+                </div>
+              )}
+
+              {/* تفسير الجدولة الآمنة */}
+              <div>
+                <h4 className="font-bold text-xs text-[#6C8480] mb-1.5">جدول الفترات الآمنة والحدود</h4>
+                {(() => {
+                  const recDueDate = getRecommendedDueDate(child.dateOfBirth, detailVac.targetAgeMonths);
+                  const minDate = getRelativeDate(recDueDate, detailVac.safeWindowStartDays || 0);
+                  const maxDate = getRelativeDate(recDueDate, detailVac.safeWindowEndDays || 30);
+                  return (
+                    <div className="relative border border-[#BAC8B1]/30 rounded-2xl p-4 overflow-hidden bg-[#BAC8B1]/5">
+                      <div className="flex justify-between text-[11px] text-[#6C8480] font-bold pb-2 border-b border-[#BAC8B1]/20">
+                        <span>أقرب موعد آمن</span>
+                        <span>الموعد الموصى به</span>
+                        <span>آخر موعد مسموح</span>
+                      </div>
+                      <div className="flex justify-between text-xs font-black text-[#404E3B] pt-2">
+                        <span>{minDate}</span>
+                        <span className="text-[#7B9669]">{recDueDate}</span>
+                        <span className="text-red-500">{maxDate}</span>
+                      </div>
+                      <div className="mt-3.5 bg-[#BAC8B1]/20 h-1.5 rounded-full relative overflow-hidden">
+                        <div className="absolute left-1/4 right-1/4 bg-[#7B9669] h-full" />
+                      </div>
+                      <p className="text-[10px] text-[#6C8480] mt-3 leading-relaxed">
+                        * تم حساب التواريخ أعلاه ديناميكياً استناداً إلى تاريخ ولادة الطفل ({child.dateOfBirth}) وقواعد برنامج التطعيم الوطني الأردني.
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -16,6 +16,10 @@ const vaccineRoutes = require('./routes/vaccineRoutes');
 const childVaccineRoutes = require('./routes/childVaccineRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const chatRoutes = require('./routes/chatRoutes');
+const reminderRoutes = require('./routes/reminderRoutes');
+const calendarRoutes = require('./routes/calendarRoutes');
+const hospitalRoutes = require('./routes/hospitalRoutes');
 
 // Error handler middleware
 const errorHandler = require('./middleware/errorHandler');
@@ -82,9 +86,11 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // ==========================================================================
 
 app.get('/api/health', (req, res) => {
+  const hasGroqKey = !!process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'your_groq_api_key_here';
   res.status(200).json({
     success: true,
     message: 'الخادم يعمل بشكل طبيعي. ✅',
+    groq_configured: hasGroqKey,
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development',
   });
@@ -101,6 +107,10 @@ app.use('/api/vaccines', vaccineRoutes);
 app.use('/api/child-vaccines', childVaccineRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/test', reminderRoutes);
+app.use('/api/calendar', calendarRoutes);
+app.use('/api/hospitals', hospitalRoutes);
 
 // ==========================================================================
 // 404 — Unknown Route Handler

@@ -8,5 +8,5 @@ module.exports = {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD,
   },
-  from: `"نظام تطعيمات الأطفال - تفلي" <${process.env.EMAIL_USER}>`,
+  from: `"نظام تطعيمات الأطفال - طفلي" <${process.env.EMAIL_USER}>`,
 };

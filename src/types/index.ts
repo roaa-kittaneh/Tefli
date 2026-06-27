@@ -1,7 +1,37 @@
 export type VaccineStatus = 'completed' | 'upcoming' | 'overdue';
 
+export interface Hospital {
+  id: number;
+  name: string;
+  type: 'Government' | 'Private';
+  city: string;
+  latitude?: number;
+  longitude?: number;
+  address?: string;
+  phone?: string;
+  isVaccinationCenter: boolean;
+  status: 'Active' | 'Inactive';
+  vaccines?: VaccineBasic[];
+}
+
+export interface VaccineBasic {
+  id: number;
+  vaccineName: string;
+  description?: string;
+  recommendedAgeMonths: number;
+  doseNumber: number;
+  availability: 'Government' | 'Private' | 'Both';
+}
+
+export interface VaccineHospitals {
+  all: Hospital[];
+  government: Hospital[];
+  private: Hospital[];
+}
+
 export interface Vaccine {
-  id: string;
+  id: string; // childVaccineId
+  vaccineId: string; // raw vaccineId from vaccines table
   name: string;
   code: string;
   description: string;
@@ -14,6 +44,11 @@ export interface Vaccine {
   sideEffects?: string[];
   administratorName?: string;
   clinicName?: string;
+  availability?: 'Government' | 'Private' | 'Both';
+  intervalRules?: string;
+  safeWindowStartDays?: number;
+  safeWindowEndDays?: number;
+  hospitals?: VaccineHospitals;
 }
 
 export interface Child {
@@ -26,9 +61,11 @@ export interface Child {
 }
 
 export interface User {
-  idNumber: string;
-  email: string;
+  id: string;
+  fullName: string;
   name: string;
+  email: string;
+  phone?: string;
 }
 
 export interface FAQItem {
@@ -36,6 +73,7 @@ export interface FAQItem {
   question: string;
   answer: string;
   category: 'before' | 'after' | 'side-effects' | 'general';
+  source?: string;
 }
 
 export interface HealthAlert {

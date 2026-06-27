@@ -1,4 +1,4 @@
-const { Vaccine, Child, ChildVaccine } = require('../models');
+const { Vaccine, Child, ChildVaccine, Hospital } = require('../models');
 
 // Helper to add months to a date
 const addMonths = (dateStr, months) => {
@@ -160,6 +160,48 @@ exports.deleteVaccine = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       message: 'تم حذف اللقاح وسجلاته بنجاح.',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/vaccines/:id/hospitals — Get all hospitals where this vaccine is available
+exports.getVaccineHospitals = async (req, res, next) => {
+  try {
+    const vaccine = await Vaccine.findByPk(req.params.id, {
+      include: [{
+        model: Hospital,
+        as: 'hospitals',
+        where: { status: 'Active' },
+        required: false,
+        attributes: ['id', 'name', 'type', 'city', 'address', 'phone', 'latitude', 'longitude', 'isVaccinationCenter'],
+        through: { attributes: [] },
+      }],
+    });
+
+    if (!vaccine) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على اللقاح المطلوب.',
+      });
+    }
+
+    const hospitals = vaccine.hospitals || [];
+
+    // Group by type for convenience
+    const government = hospitals.filter(h => h.type === 'Government');
+    const privateClinics = hospitals.filter(h => h.type === 'Private');
+
+    return res.status(200).json({
+      success: true,
+      vaccineId: vaccine.id,
+      vaccineName: vaccine.vaccineName,
+      data: {
+        all: hospitals,
+        government,
+        private: privateClinics,
+      },
     });
   } catch (error) {
     next(error);

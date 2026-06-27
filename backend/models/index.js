@@ -18,6 +18,8 @@ db.Vaccine = require('./Vaccine')(sequelize);
 db.ChildVaccine = require('./ChildVaccine')(sequelize);
 db.Notification = require('./Notification')(sequelize);
 db.PasswordResetToken = require('./PasswordResetToken')(sequelize);
+db.Hospital = require('./Hospital')(sequelize);
+db.HospitalVaccine = require('./HospitalVaccine')(sequelize);
 
 // Run associate definitions
 Object.keys(db).forEach((modelName) => {

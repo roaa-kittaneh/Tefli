@@ -18,6 +18,9 @@ router.patch('/:id/read', notificationController.markAsRead);
 // @DELETE /api/notifications/:id  - Delete a notification
 router.delete('/:id', notificationController.deleteNotification);
 
+// @POST /api/notifications/test  - Trigger a test email notification
+router.post('/test', notificationController.triggerTestNotification);
+
 // @GET /api/notifications/all  - Admin: get ALL notifications in the system
 router.get('/all', restrictTo('Admin'), notificationController.getAllNotifications);
 

@@ -1,557 +1,493 @@
 import { create } from 'zustand';
-import type { Child, Vaccine, FAQItem, HealthAlert, VaccineStatus, User } from '../types';
+import type { Child, Vaccine, FAQItem, HealthAlert, VaccineStatus, User, Hospital, VaccineHospitals } from '../types';
+import { apiFetch } from '../utils/api';
+import { initialFAQs } from '../data/faqs';
 
-interface VaccineStore {
+export interface VaccineStore {
   children: Child[];
   selectedChildId: string;
   vaccines: Record<string, Vaccine[]>;
   faqs: FAQItem[];
   alerts: Record<string, HealthAlert[]>;
-  activeTab: 'dashboard' | 'calendar' | 'history' | 'faq' | 'chatbot';
+  activeTab: 'dashboard' | 'calendar' | 'history' | 'faq' | 'chatbot' | 'map';
+
+  // Hospital State
+  hospitals: Hospital[];
+  hospitalsLoading: boolean;
+  selectedHospitalIdForMap: number | null;
+  setSelectedHospitalIdForMap: (id: number | null) => void;
 
   // Auth State
   currentUser: User | null;
   isLoggedIn: boolean;
   authError: string | null;
-  registeredUsers: User[];
+  isLoading: boolean;
 
   // Actions
   setSelectedChildId: (id: string) => void;
-  updateChildStats: (childId: string, weightKg: number, heightCm: number) => void;
-  toggleVaccineStatus: (childId: string, vaccineId: string, status: VaccineStatus, completedDate?: string) => void;
-  rescheduleVaccine: (childId: string, vaccineId: string, newDate: string) => void;
+  updateChildStats: (childId: string, weightKg: number, heightCm: number) => Promise<boolean>;
+  toggleVaccineStatus: (childId: string, vaccineId: string, status: VaccineStatus, completedDate?: string) => Promise<boolean>;
+  rescheduleVaccine: (childId: string, vaccineId: string, newDate: string) => Promise<{ success: boolean; message?: string }>;
   addVaccineNote: (childId: string, vaccineId: string, note: string) => void;
-  setActiveTab: (tab: 'dashboard' | 'calendar' | 'history' | 'faq' | 'chatbot') => void;
-  addAlert: (childId: string, alert: Omit<HealthAlert, 'id'>) => void;
-  dismissAlert: (childId: string, alertId: string) => void;
+  setActiveTab: (tab: 'dashboard' | 'calendar' | 'history' | 'faq' | 'chatbot' | 'map') => void;
+  dismissAlert: (childId: string, alertId: string) => Promise<void>;
+  triggerTestNotification: () => Promise<{ success: boolean; message: string }>;
+
+  // Hospital Actions
+  fetchHospitals: () => Promise<void>;
+  fetchVaccineHospitals: (vaccineId: string) => Promise<VaccineHospitals>;
 
   // Auth Actions
-  login: (email: string, idNumber: string) => boolean;
-  signup: (user: User) => boolean;
+  login: (email: string, idNumber: string) => Promise<boolean>;
+  signup: (signupData: { fullName: string; email: string; idNumber: string; childName: string; birthDate: string; gender: 'male' | 'female' }) => Promise<boolean>;
   logout: () => void;
   clearAuthError: () => void;
+  checkAuth: () => Promise<void>;
+  addChild: (childData: { firstName: string; lastName: string; gender: 'Male' | 'Female'; birthDate: string }) => Promise<boolean>;
+  fetchSchedule: (childId: string) => Promise<void>;
 }
 
-const initialChildren: Child[] = [
-  {
-    id: 'child-1',
-    name: 'سارة أحمد',
-    dateOfBirth: '2025-12-12',
-    weightKg: 7.2,
-    heightCm: 65,
-    gender: 'female',
-  },
-  {
-    id: 'child-2',
-    name: 'زيد أحمد',
-    dateOfBirth: '2023-04-10',
-    weightKg: 14.5,
-    heightCm: 96,
-    gender: 'male',
-  }
-];
-
-const initialVaccines: Record<string, Vaccine[]> = {
-  'child-1': [
-    {
-      id: 'v1',
-      name: 'السل (BCG)',
-      code: 'BCG',
-      description: 'يحمي من التهاب السحايا السلي والسل المنتشر.',
-      ageGroup: 'عند الولادة',
-      targetAgeMonths: 0,
-      scheduledDate: '2025-12-12',
-      completedDate: '2025-12-12',
-      status: 'completed',
-      notes: 'أُعطيَ في مستشفى الجامعة الأردنية.',
-      administratorName: 'د. خالد المطيري',
-      clinicName: 'مركز صحة العقبة',
-    },
-    {
-      id: 'v2',
-      name: 'التهاب الكبد B - الجرعة 1',
-      code: 'HepB-1',
-      description: 'يحمي من الإصابة بفيروس التهاب الكبد B.',
-      ageGroup: 'عند الولادة',
-      targetAgeMonths: 0,
-      scheduledDate: '2025-12-12',
-      completedDate: '2025-12-12',
-      status: 'completed',
-      administratorName: 'د. خالد المطيري',
-      clinicName: 'مركز صحة العقبة',
-    },
-    {
-      id: 'v3',
-      name: 'فيروس الروتا - الجرعة 1',
-      code: 'Rota-1',
-      description: 'لقاح فموي يحمي من الإسهال الشديد الناجم عن فيروس الروتا.',
-      ageGroup: 'شهران',
-      targetAgeMonths: 2,
-      scheduledDate: '2026-02-12',
-      completedDate: '2026-02-14',
-      status: 'completed',
-      administratorName: 'د. رانيا جراح',
-      clinicName: 'عيادة أطفال عمان',
-    },
-    {
-      id: 'v4',
-      name: 'اللقاح السداسي - الجرعة 1',
-      code: 'DTaP-IPV-Hib-HepB-1',
-      description: 'يحمي من الدفتيريا والتيتانوس والسعال الديكي وشلل الأطفال والمستدمية النزلية والتهاب الكبد B.',
-      ageGroup: 'شهران',
-      targetAgeMonths: 2,
-      scheduledDate: '2026-02-12',
-      completedDate: '2026-02-14',
-      status: 'completed',
-      administratorName: 'د. رانيا جراح',
-      clinicName: 'عيادة أطفال عمان',
-    },
-    {
-      id: 'v5',
-      name: 'المكورات الرئوية (PCV13) - الجرعة 1',
-      code: 'PCV-1',
-      description: 'يحمي من الالتهاب الرئوي والتهاب السحايا الناجم عن المكورات الرئوية.',
-      ageGroup: 'شهران',
-      targetAgeMonths: 2,
-      scheduledDate: '2026-02-12',
-      completedDate: '2026-02-14',
-      status: 'completed',
-      administratorName: 'د. رانيا جراح',
-      clinicName: 'عيادة أطفال عمان',
-    },
-    {
-      id: 'v6',
-      name: 'اللقاح السداسي - الجرعة 2',
-      code: 'DTaP-IPV-Hib-HepB-2',
-      description: 'الجرعة الثانية للحماية من الأمراض الستة الرئيسية للأطفال.',
-      ageGroup: '٤ أشهر',
-      targetAgeMonths: 4,
-      scheduledDate: '2026-04-12',
-      completedDate: '2026-04-12',
-      status: 'completed',
-      administratorName: 'د. خالد المطيري',
-      clinicName: 'مركز صحة العقبة',
-    },
-    {
-      id: 'v7',
-      name: 'المكورات الرئوية (PCV13) - الجرعة 2',
-      code: 'PCV-2',
-      description: 'الجرعة التنشيطية الثانية للوقاية من المكورات الرئوية.',
-      ageGroup: '٤ أشهر',
-      targetAgeMonths: 4,
-      scheduledDate: '2026-04-12',
-      completedDate: '2026-04-12',
-      status: 'completed',
-      administratorName: 'د. خالد المطيري',
-      clinicName: 'مركز صحة العقبة',
-    },
-    {
-      id: 'v8',
-      name: 'فيروس الروتا - الجرعة 2',
-      code: 'Rota-2',
-      description: 'الجرعة الفموية الثانية للوقاية من الروتا.',
-      ageGroup: '٤ أشهر',
-      targetAgeMonths: 4,
-      scheduledDate: '2026-04-12',
-      completedDate: '2026-04-12',
-      status: 'completed',
-      administratorName: 'د. خالد المطيري',
-      clinicName: 'مركز صحة العقبة',
-    },
-    {
-      id: 'v9',
-      name: 'اللقاح السداسي - الجرعة 3 (منشط السعال الديكي)',
-      code: 'DTaP-IPV-Hib-HepB-3',
-      description: 'الجرعة الثالثة. مهمة للمناعة طويلة الأمد ضد السعال الديكي وشلل الأطفال.',
-      ageGroup: '٦ أشهر',
-      targetAgeMonths: 6,
-      scheduledDate: '2026-07-12',
-      status: 'upcoming',
-      notes: 'الموعد الساعة 10:00 صباحاً. أحضري الدفتر الصحي.',
-    },
-    {
-      id: 'v10',
-      name: 'المكورات الرئوية (PCV13) - الجرعة 3',
-      code: 'PCV-3',
-      description: 'الجرعة الثالثة للوقاية من المكورات الرئوية.',
-      ageGroup: '٦ أشهر',
-      targetAgeMonths: 6,
-      scheduledDate: '2026-06-15',
-      status: 'overdue',
-      notes: 'تأجّل الموعد في 15 يونيو بسبب زكام خفيف. يرجى إعادة الجدولة فوراً.',
-    },
-    {
-      id: 'v11',
-      name: 'لقاح الحصبة',
-      code: 'Measles',
-      description: 'تحصين ضد الحصبة بمستضد واحد.',
-      ageGroup: '٩ أشهر',
-      targetAgeMonths: 9,
-      scheduledDate: '2026-09-12',
-      status: 'upcoming',
-    },
-    {
-      id: 'v12',
-      name: 'الثلاثي الفيروسي MMR - الجرعة 1',
-      code: 'MMR-1',
-      description: 'حماية ثلاثية ضد الحصبة والنكاف والحصبة الألمانية.',
-      ageGroup: '١٢ شهراً',
-      targetAgeMonths: 12,
-      scheduledDate: '2026-12-12',
-      status: 'upcoming',
-    },
-    {
-      id: 'v13',
-      name: 'المكورات السحائية ACWY',
-      code: 'MenACWY',
-      description: 'يحمي من التهاب السحايا البكتيري الناجم عن أنواع A و C و W و Y.',
-      ageGroup: '١٢ شهراً',
-      targetAgeMonths: 12,
-      scheduledDate: '2026-12-12',
-      status: 'upcoming',
-    },
-    {
-      id: 'v14',
-      name: 'جدري الماء (Varicella) - الجرعة 1',
-      code: 'Varicella-1',
-      description: 'يحمي من فيروس الحماق النطاقي (جدري الماء).',
-      ageGroup: '١٨ شهراً',
-      targetAgeMonths: 18,
-      scheduledDate: '2027-06-12',
-      status: 'upcoming',
-    }
-  ],
-  'child-2': [
-    {
-      id: 'v2-1',
-      name: 'السل (BCG)',
-      code: 'BCG',
-      description: 'يحمي من التهاب السحايا السلي.',
-      ageGroup: 'عند الولادة',
-      targetAgeMonths: 0,
-      scheduledDate: '2023-04-10',
-      completedDate: '2023-04-10',
-      status: 'completed',
-    },
-    {
-      id: 'v2-2',
-      name: 'التهاب الكبد B - الجرعة 1',
-      code: 'HepB-1',
-      description: 'الحماية من التهاب الكبد B.',
-      ageGroup: 'عند الولادة',
-      targetAgeMonths: 0,
-      scheduledDate: '2023-04-10',
-      completedDate: '2023-04-10',
-      status: 'completed',
-    },
-    {
-      id: 'v2-3',
-      name: 'اللقاح السداسي - الجرعة 1',
-      code: 'DTaP-IPV-Hib-HepB-1',
-      description: 'الحماية السداسية الكاملة.',
-      ageGroup: 'شهران',
-      targetAgeMonths: 2,
-      scheduledDate: '2023-06-10',
-      completedDate: '2023-06-12',
-      status: 'completed',
-    },
-    {
-      id: 'v2-4',
-      name: 'اللقاح السداسي - الجرعة 2',
-      code: 'DTaP-IPV-Hib-HepB-2',
-      description: 'الحماية السداسية الكاملة.',
-      ageGroup: '٤ أشهر',
-      targetAgeMonths: 4,
-      scheduledDate: '2023-08-10',
-      completedDate: '2023-08-10',
-      status: 'completed',
-    },
-    {
-      id: 'v2-5',
-      name: 'اللقاح السداسي - الجرعة 3',
-      code: 'DTaP-IPV-Hib-HepB-3',
-      description: 'الحماية السداسية الكاملة.',
-      ageGroup: '٦ أشهر',
-      targetAgeMonths: 6,
-      scheduledDate: '2023-10-10',
-      completedDate: '2023-10-10',
-      status: 'completed',
-    },
-    {
-      id: 'v2-6',
-      name: 'الثلاثي الفيروسي MMR - الجرعة 1',
-      code: 'MMR-1',
-      description: 'الحصبة والنكاف والحصبة الألمانية.',
-      ageGroup: '١٢ شهراً',
-      targetAgeMonths: 12,
-      scheduledDate: '2024-04-10',
-      completedDate: '2024-04-12',
-      status: 'completed',
-    },
-    {
-      id: 'v2-7',
-      name: 'جدري الماء - الجرعة 1',
-      code: 'Varicella-1',
-      description: 'الوقاية من جدري الماء.',
-      ageGroup: '١٨ شهراً',
-      targetAgeMonths: 18,
-      scheduledDate: '2024-10-10',
-      completedDate: '2024-10-10',
-      status: 'completed',
-    },
-    {
-      id: 'v2-8',
-      name: 'الثلاثي الفيروسي MMR - الجرعة 2',
-      code: 'MMR-2',
-      description: 'الجرعة التنشيطية الثانية.',
-      ageGroup: '٤-٦ سنوات',
-      targetAgeMonths: 48,
-      scheduledDate: '2027-04-10',
-      status: 'upcoming',
-    }
-  ]
-};
-
-const initialAlerts: Record<string, HealthAlert[]> = {
-  'child-1': [
-    {
-      id: 'a1',
-      type: 'urgent',
-      title: 'تطعيم PCV-3 متأخر',
-      message: 'سارة متأخرة في تطعيم المكورات الرئوية PCV-3 منذ 15 يونيو 2026. يرجى تحديد موعد فوراً.',
-      date: '2026-06-16',
-      vaccineId: 'v10'
-    },
-    {
-      id: 'a2',
-      type: 'warning',
-      title: 'موعد اللقاح السداسي القادم',
-      message: 'الجرعة الثالثة من اللقاح السداسي مجدولة في 12 يوليو 2026 (البرنامج الوطني الأردني للتطعيم).',
-      date: '2026-06-25',
-      vaccineId: 'v9'
-    }
-  ],
-  'child-2': [
-    {
-      id: 'a3',
-      type: 'info',
-      title: 'الجرعة التنشيطية القادمة في 2027',
-      message: 'زيد محدّث بجميع تطعيمات مرحلة الطفولة! الجرعة التالية المجدولة (MMR-2) عند بلوغه ٤ سنوات.',
-      date: '2025-05-01'
-    }
-  ]
-};
-
-const initialFAQs: FAQItem[] = [
-  {
-    id: 'faq-1',
-    category: 'before',
-    question: 'هل يجب أن يكون طفلي بصحة كاملة قبل التطعيم؟',
-    answer: 'الأمراض البسيطة كالزكام الخفيف أو الحمى المنخفضة أو السعال الطفيف لا تستدعي عادةً تأجيل التطعيم. أما إذا كان طفلك يعاني من مرض متوسط أو شديد مع حمى أو بدونها، فيُنصح بإعادة جدولة الموعد مع طبيب الأطفال.',
-  },
-  {
-    id: 'faq-2',
-    category: 'before',
-    question: 'هل يجب إعطاء طفلي مسكنات ألم وقائية قبل الحقنة؟',
-    answer: 'لا يُنصح باستخدام مسكنات الألم (كالباراسيتامول أو الإيبوبروفين) بشكل وقائي قبل التطعيم؛ لأنها قد تقلل قليلاً من الاستجابة المناعية لبعض اللقاحات. من الأفضل الانتظار ومراقبة ما إذا أصيب الطفل بحمى أو انزعاج بعد الحقن.',
-  },
-  {
-    id: 'faq-3',
-    category: 'before',
-    question: 'ما الوثائق التي يجب إحضارها إلى المركز الصحي؟',
-    answer: 'احرصي دائماً على إحضار: الدفتر الصحي للطفل (الدفتر الورقي الوطني)، ونسخة من الهوية الوطنية أو شهادة الميلاد، وبطاقة التأمين الصحي إن وُجدت. يساعد التتبع الرقمي، لكن الدفتر الورقي ضروري للختم الرسمي.',
-  },
-  {
-    id: 'faq-4',
-    category: 'after',
-    question: 'كيف أعتني بطفلي بعد التطعيم؟',
-    answer: 'احتضني طفلك وواسِيه، وأرضعيه أو أعطِيه الحليب الصناعي بكميات أكبر من المعتاد للترطيب، وضعي قطعة قماش باردة مبللة على موضع الحقن لتخفيف الألم. اتركِيه يرتاح كما يشاء، وراقِبيه لعدة أيام.',
-  },
-  {
-    id: 'faq-5',
-    category: 'side-effects',
-    question: 'ما هي الآثار الجانبية الشائعة للتطعيمات؟',
-    answer: 'تشمل الآثار الجانبية الشائعة: حمى خفيفة، واحمرار وتورم وألم في موضع الحقن، وتهيج خفيف أو نعاس. تزول عادةً خلال 24 إلى 48 ساعة. إذا تجاوزت الحمى 38.5 درجة أو استمرت، استشيري طبيب الأطفال.',
-  },
-  {
-    id: 'faq-6',
-    category: 'general',
-    question: 'لماذا يجب اتباع جدول التطعيم الأردني الوطني؟',
-    answer: 'صُمِّم جدول التطعيم علمياً لحماية الأطفال الرضع في الوقت الذي يكونون فيه أكثر عرضة للمضاعفات الخطيرة المهددة للحياة. يعرّض إهمال التطعيمات أو تأجيلها الأطفال لخطر الأوبئة القابلة للوقاية.',
-  }
-];
-
-export const useVaccineStore = create<VaccineStore>((set) => ({
-  children: initialChildren,
-  selectedChildId: 'child-1',
-  vaccines: initialVaccines,
-  faqs: initialFAQs,
-  alerts: initialAlerts,
-  activeTab: 'dashboard',
-
-  currentUser: null,
-  isLoggedIn: false,
-  authError: null,
-  registeredUsers: [
-    { idNumber: '1234567890', email: 'sara@tifli.jo', name: 'سارة الأحمد' }
-  ],
-
-  setSelectedChildId: (id) => set({ selectedChildId: id }),
-
-  login: (email, idNumber) => {
-    let success = false;
-    set((state) => {
-      const user = state.registeredUsers.find(
-        (u) => u.email.toLowerCase() === email.toLowerCase() && u.idNumber === idNumber
-      );
-      if (user) {
-        success = true;
-        return { currentUser: user, isLoggedIn: true, authError: null };
-      } else {
-        return { authError: 'البريد الإلكتروني أو رقم الهوية غير صحيح. يرجى المحاولة مرة أخرى.' };
-      }
-    });
-    return success;
-  },
-
-  signup: (user) => {
-    let success = false;
-    set((state) => {
-      const exists = state.registeredUsers.some(
-        (u) => u.email.toLowerCase() === user.email.toLowerCase() || u.idNumber === user.idNumber
-      );
-      if (exists) {
-        return { authError: 'يوجد حساب بالفعل بهذا البريد الإلكتروني أو رقم الهوية.' };
-      }
-      success = true;
-      return {
-        registeredUsers: [...state.registeredUsers, user],
-        currentUser: user,
-        isLoggedIn: true,
-        authError: null,
-      };
-    });
-    return success;
-  },
-
-  logout: () => set({ currentUser: null, isLoggedIn: false, authError: null, activeTab: 'dashboard' }),
-  clearAuthError: () => set({ authError: null }),
-
-  updateChildStats: (childId, weightKg, heightCm) =>
-    set((state) => ({
-      children: state.children.map((c) =>
-        c.id === childId ? { ...c, weightKg, heightCm } : c
-      ),
-    })),
-
-  toggleVaccineStatus: (childId, vaccineId, status, completedDate) =>
-    set((state) => {
-      const childVaccines = state.vaccines[childId] || [];
-      const updatedVaccines = childVaccines.map((v) => {
-        if (v.id === vaccineId) {
-          return {
-            ...v,
-            status,
-            completedDate: status === 'completed' ? completedDate || new Date().toISOString().split('T')[0] : undefined,
-          };
+export const useVaccineStore = create<VaccineStore>((set, get) => {
+  // Helper to fetch and load a child's schedule
+  const fetchChildSchedule = async (childId: string) => {
+    try {
+      const response = await apiFetch(`/calendar?childId=${childId}`);
+      const mapped = response.data.map((r: any) => {
+        let status: VaccineStatus = 'upcoming';
+        if (r.status === 'Completed') {
+          status = 'completed';
+        } else if (r.status === 'Pending' || r.status === 'Missed') {
+          status = 'overdue';
         }
-        return v;
+
+        return {
+          id: r.id.toString(),
+          vaccineId: r.vaccine.id.toString(),
+          name: r.vaccine.vaccineName,
+          code: r.vaccine.vaccineName.split(' ')[0] || 'VAC',
+          description: r.vaccine.description || '',
+          ageGroup: r.vaccine.recommendedAgeMonths === 0 ? 'عند الولادة' : `${r.vaccine.recommendedAgeMonths} شهراً`,
+          targetAgeMonths: r.vaccine.recommendedAgeMonths,
+          scheduledDate: r.scheduledDate,
+          completedDate: r.takenDate || undefined,
+          status,
+          availability: r.vaccine.availability,
+          intervalRules: r.vaccine.intervalRules || '',
+          safeWindowStartDays: r.vaccine.safeWindowStartDays,
+          safeWindowEndDays: r.vaccine.safeWindowEndDays,
+        };
       });
 
-      let updatedAlerts = state.alerts[childId] || [];
-      if (status === 'completed') {
-        updatedAlerts = updatedAlerts.filter((a) => a.vaccineId !== vaccineId);
-      } else if (status === 'overdue') {
-        const vInfo = childVaccines.find((v) => v.id === vaccineId);
-        if (vInfo && !updatedAlerts.some((a) => a.vaccineId === vaccineId)) {
-          updatedAlerts = [
-            ...updatedAlerts,
-            {
-              id: `alert-${Date.now()}`,
-              type: 'urgent',
-              title: `تطعيم ${vInfo.code} متأخر`,
-              message: `${vInfo.name} متأخر منذ ${vInfo.scheduledDate}. يرجى إعادة الجدولة.`,
-              date: new Date().toISOString().split('T')[0],
-              vaccineId,
-            },
-          ];
-        }
-      }
+      set((state) => ({
+        vaccines: { ...state.vaccines, [childId]: mapped }
+      }));
+    } catch (error) {
+      console.error('Failed to fetch child schedule:', error);
+    }
+  };
 
-      return {
-        vaccines: { ...state.vaccines, [childId]: updatedVaccines },
-        alerts: { ...state.alerts, [childId]: updatedAlerts },
-      };
-    }),
+  // Helper to fetch in-app notifications and map to HealthAlerts
+  const fetchUserNotifications = async () => {
+    try {
+      const response = await apiFetch('/notifications');
+      const mappedAlerts: Record<string, HealthAlert[]> = {};
 
-  rescheduleVaccine: (childId, vaccineId, newDate) =>
-    set((state) => {
-      const childVaccines = state.vaccines[childId] || [];
-      const updatedVaccines = childVaccines.map((v) => {
-        if (v.id === vaccineId) {
-          const isFuture = new Date(newDate) > new Date();
-          return {
-            ...v,
-            scheduledDate: newDate,
-            status: isFuture ? 'upcoming' as const : 'overdue' as const,
-          };
-        }
-        return v;
-      });
+      response.data.forEach((n: any) => {
+        // Map backend notifications to HealthAlert
+        const alert: HealthAlert = {
+          id: n.id.toString(),
+          type: n.isRead ? 'info' : (n.title.includes('متأخر') || n.title.includes('تحذير') ? 'urgent' : 'warning'),
+          title: n.title,
+          message: n.body,
+          date: n.createdAt.split('T')[0],
+          vaccineId: n.childVaccineId ? n.childVaccineId.toString() : undefined,
+        };
 
-      let updatedAlerts = state.alerts[childId] || [];
-      const vInfo = updatedVaccines.find((v) => v.id === vaccineId);
-      if (vInfo) {
-        updatedAlerts = updatedAlerts.map((a) => {
-          if (a.vaccineId === vaccineId) {
-            const isFuture = new Date(newDate) > new Date();
-            return {
-              ...a,
-              type: isFuture ? ('warning' as const) : ('urgent' as const),
-              title: isFuture ? `موعد ${vInfo.code} القادم` : `تطعيم ${vInfo.code} متأخر`,
-              message: isFuture
-                ? `${vInfo.name} مجدول في ${newDate}.`
-                : `${vInfo.name} متأخر منذ ${newDate}. يرجى إعادة الجدولة.`,
-            };
+        // Put notifications in active child's bucket for display
+        const activeChildId = get().selectedChildId;
+        if (activeChildId) {
+          if (!mappedAlerts[activeChildId]) {
+            mappedAlerts[activeChildId] = [];
           }
-          return a;
-        });
+          mappedAlerts[activeChildId].push(alert);
+        }
+      });
+
+      set({ alerts: mappedAlerts });
+    } catch (error) {
+      console.error('Failed to fetch notifications:', error);
+    }
+  };
+
+  return {
+    children: [],
+    selectedChildId: '',
+    vaccines: {},
+    faqs: initialFAQs,
+    alerts: {},
+    hospitals: [],
+    hospitalsLoading: false,
+    activeTab: 'dashboard',
+    currentUser: null,
+    isLoggedIn: false,
+    authError: null,
+    selectedHospitalIdForMap: null,
+    setSelectedHospitalIdForMap: (id) => set({ selectedHospitalIdForMap: id }),
+    isLoading: false,
+
+    setSelectedChildId: (id) => {
+      set({ selectedChildId: id });
+      if (id) {
+        fetchChildSchedule(id);
+        fetchUserNotifications();
       }
+    },
 
-      return {
-        vaccines: { ...state.vaccines, [childId]: updatedVaccines },
-        alerts: { ...state.alerts, [childId]: updatedAlerts },
-      };
-    }),
+    setActiveTab: (tab) => set({ activeTab: tab }),
 
-  addVaccineNote: (childId, vaccineId, note) =>
-    set((state) => ({
-      vaccines: {
-        ...state.vaccines,
-        [childId]: (state.vaccines[childId] || []).map((v) =>
-          v.id === vaccineId ? { ...v, notes: note } : v
-        ),
-      },
-    })),
+    clearAuthError: () => set({ authError: null }),
 
-  setActiveTab: (tab) => set({ activeTab: tab }),
+    // Auth Operations
+    login: async (email, password) => {
+      set({ isLoading: true, authError: null });
+      try {
+        const response = await apiFetch('/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ email, password }),
+        });
 
-  addAlert: (childId, alert) =>
-    set((state) => ({
-      alerts: {
-        ...state.alerts,
-        [childId]: [
-          ...(state.alerts[childId] || []),
-          { ...alert, id: `alert-${Date.now()}` },
-        ],
-      },
-    })),
+        localStorage.setItem('tefli_token', response.token);
+        
+        const user: User = {
+          id: response.user.id.toString(),
+          fullName: response.user.fullName,
+          name: response.user.fullName,
+          email: response.user.email,
+          phone: response.user.phone,
+        };
 
-  dismissAlert: (childId, alertId) =>
-    set((state) => ({
-      alerts: {
-        ...state.alerts,
-        [childId]: (state.alerts[childId] || []).filter((a) => a.id !== alertId),
-      },
-    })),
-}));
+        set({ currentUser: user, isLoggedIn: true, isLoading: false });
+
+        // Load children data
+        const childrenResponse = await apiFetch('/children');
+        const childrenData: Child[] = childrenResponse.data.map((c: any) => ({
+          id: c.id.toString(),
+          name: `${c.firstName} ${c.lastName}`.trim(),
+          dateOfBirth: c.birthDate,
+          weightKg: c.weight ? Number(c.weight) : undefined,
+          heightCm: c.height ? Number(c.height) : undefined,
+          gender: c.gender.toLowerCase() === 'female' ? 'female' : 'male',
+        }));
+
+        set({ children: childrenData });
+        
+        if (childrenData.length > 0) {
+          const firstChildId = childrenData[0].id;
+          set({ selectedChildId: firstChildId });
+          await fetchChildSchedule(firstChildId);
+          await fetchUserNotifications();
+        }
+
+        return true;
+      } catch (error: any) {
+        set({ authError: error.message, isLoading: false });
+        return false;
+      }
+    },
+
+    signup: async (signupData) => {
+      set({ isLoading: true, authError: null });
+      try {
+        // Sign up expects childName and birthDate to create the first child atomically
+        const response = await apiFetch('/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({
+            fullName: signupData.fullName,
+            email: signupData.email,
+            password: signupData.idNumber, // uses ID number field as password input
+            childName: signupData.childName,
+            birthDate: signupData.birthDate,
+            gender: signupData.gender === 'female' ? 'Female' : 'Male',
+          }),
+        });
+
+        localStorage.setItem('tefli_token', response.token);
+        
+        const user: User = {
+          id: response.user.id.toString(),
+          fullName: response.user.fullName,
+          name: response.user.fullName,
+          email: response.user.email,
+          phone: response.user.phone,
+        };
+
+        set({ currentUser: user, isLoggedIn: true, isLoading: false });
+
+        const firstChild: Child = {
+          id: response.child.id.toString(),
+          name: `${response.child.firstName} ${response.child.lastName}`.trim(),
+          dateOfBirth: response.child.birthDate,
+          gender: response.child.gender?.toLowerCase() === 'female' ? 'female' : 'male',
+        };
+
+        set({ children: [firstChild], selectedChildId: firstChild.id });
+        await fetchChildSchedule(firstChild.id);
+        await fetchUserNotifications();
+
+        return true;
+      } catch (error: any) {
+        set({ authError: error.message, isLoading: false });
+        return false;
+      }
+    },
+
+    logout: () => {
+      localStorage.removeItem('tefli_token');
+      set({
+        currentUser: null,
+        isLoggedIn: false,
+        children: [],
+        selectedChildId: '',
+        vaccines: {},
+        alerts: {},
+        activeTab: 'dashboard',
+        authError: null,
+      });
+    },
+
+    checkAuth: async () => {
+      const token = localStorage.getItem('tefli_token');
+      if (!token) return;
+
+      try {
+        // Try getting user's children. If it succeeds, user is authenticated
+        const childrenResponse = await apiFetch('/children');
+        
+        // Setup user details from the backend profile
+        const profileResponse = await apiFetch('/users/profile');
+        const userData = profileResponse.data || profileResponse;
+
+        const user: User = {
+          id: userData.id.toString(),
+          fullName: userData.fullName,
+          name: userData.fullName,
+          email: userData.email,
+        };
+
+        const childrenData: Child[] = childrenResponse.data.map((c: any) => ({
+          id: c.id.toString(),
+          name: `${c.firstName} ${c.lastName}`.trim(),
+          dateOfBirth: c.birthDate,
+          weightKg: c.weight ? Number(c.weight) : undefined,
+          heightCm: c.height ? Number(c.height) : undefined,
+          gender: c.gender.toLowerCase() === 'female' ? 'female' : 'male',
+        }));
+
+        set({ currentUser: user, isLoggedIn: true, children: childrenData });
+
+        if (childrenData.length > 0) {
+          const activeId = get().selectedChildId || childrenData[0].id;
+          set({ selectedChildId: activeId });
+          await fetchChildSchedule(activeId);
+          await fetchUserNotifications();
+        }
+      } catch (error) {
+        console.error('Check auth failed, logging out:', error);
+        localStorage.removeItem('tefli_token');
+      }
+    },
+
+    // Children Operations
+    addChild: async (childData) => {
+      try {
+        const response = await apiFetch('/children', {
+          method: 'POST',
+          body: JSON.stringify(childData),
+        });
+
+        // Re-fetch all children to ensure synchrony
+        const childrenResponse = await apiFetch('/children');
+        const childrenData: Child[] = childrenResponse.data.map((c: any) => ({
+          id: c.id.toString(),
+          name: `${c.firstName} ${c.lastName}`.trim(),
+          dateOfBirth: c.birthDate,
+          weightKg: c.weight ? Number(c.weight) : undefined,
+          heightCm: c.height ? Number(c.height) : undefined,
+          gender: c.gender.toLowerCase() === 'female' ? 'female' : 'male',
+        }));
+
+        // Set state and select the newly created child
+        const newChildId = response.data.id.toString();
+        set({ children: childrenData, selectedChildId: newChildId });
+
+        await fetchChildSchedule(newChildId);
+        await fetchUserNotifications();
+
+        return true;
+      } catch (error) {
+        console.error('Failed to add child:', error);
+        return false;
+      }
+    },
+
+    updateChildStats: async (childId, weightKg, heightCm) => {
+      try {
+        await apiFetch(`/children/${childId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            weight: weightKg,
+            height: heightCm,
+          }),
+        });
+
+        set((state) => ({
+          children: state.children.map((c) =>
+            c.id === childId ? { ...c, weightKg, heightCm } : c
+          ),
+        }));
+
+        return true;
+      } catch (error) {
+        console.error('Failed to update child stats:', error);
+        return false;
+      }
+    },
+
+    // Vaccination Operations
+    toggleVaccineStatus: async (childId, vaccineId, status, completedDate) => {
+      try {
+        if (status === 'completed') {
+          // Mark as taken
+          await apiFetch(`/child-vaccines/${vaccineId}/mark-taken`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              takenDate: completedDate || new Date().toISOString().split('T')[0],
+            }),
+          });
+        } else {
+          // Reset status to upcoming/pending (resets takenDate to null on backend)
+          await apiFetch(`/child-vaccines/${vaccineId}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              status: 'Upcoming',
+            }),
+          });
+        }
+
+        // Reload schedule and notifications
+        await fetchChildSchedule(childId);
+        await fetchUserNotifications();
+        return true;
+      } catch (error) {
+        console.error('Failed to toggle vaccine status:', error);
+        return false;
+      }
+    },
+
+    rescheduleVaccine: async (childId, vaccineId, newDate) => {
+      try {
+        const response = await apiFetch(`/child-vaccines/${vaccineId}/reschedule`, {
+          method: 'PATCH',
+          body: JSON.stringify({ newDate }),
+        });
+
+        // Reload schedule and notifications
+        await fetchChildSchedule(childId);
+        await fetchUserNotifications();
+
+        return { success: true, message: response.message };
+      } catch (error: any) {
+        console.error('Failed to reschedule vaccine:', error.message);
+        return { success: false, message: error.message };
+      }
+    },
+
+    addVaccineNote: (childId, vaccineId, note) => {
+      set((state) => ({
+        vaccines: {
+          ...state.vaccines,
+          [childId]: (state.vaccines[childId] || []).map((v) =>
+            v.id === vaccineId ? { ...v, notes: note } : v
+          ),
+        },
+      }));
+    },
+
+    dismissAlert: async (childId, alertId) => {
+      try {
+        await apiFetch(`/notifications/${alertId}`, {
+          method: 'DELETE',
+        });
+
+        set((state) => ({
+          alerts: {
+            ...state.alerts,
+            [childId]: (state.alerts[childId] || []).filter((a) => a.id !== alertId),
+          },
+        }));
+      } catch (error) {
+        console.error('Failed to dismiss alert:', error);
+      }
+    },
+
+    triggerTestNotification: async () => {
+      try {
+        const response = await apiFetch('/notifications/test', {
+          method: 'POST',
+        });
+
+        // Reload notifications to show in UI
+        await fetchUserNotifications();
+
+        return { success: true, message: response.message };
+      } catch (error: any) {
+        console.error('Failed to trigger test notification:', error.message);
+        return { success: false, message: error.message };
+      }
+    },
+
+    fetchSchedule: async (childId: string) => {
+      await fetchChildSchedule(childId);
+    },
+
+    fetchHospitals: async () => {
+      if (get().hospitalsLoading) return;
+      set({ hospitalsLoading: true });
+      try {
+        const response = await apiFetch('/hospitals/city/amman');
+        set({ hospitals: response.data, hospitalsLoading: false });
+      } catch (error) {
+        console.error('Failed to fetch hospitals:', error);
+        set({ hospitalsLoading: false });
+      }
+    },
+
+    fetchVaccineHospitals: async (vaccineId: string): Promise<VaccineHospitals> => {
+      try {
+        const response = await apiFetch(`/vaccines/${vaccineId}/hospitals`);
+        const result: VaccineHospitals = {
+          all: response.data.all || [],
+          government: response.data.government || [],
+          private: response.data.private || [],
+        };
+
+        // Cache in vaccine entry
+        set((state) => ({
+          vaccines: Object.fromEntries(
+            Object.entries(state.vaccines).map(([childId, vacs]) => [
+              childId,
+              vacs.map((v) =>
+                v.vaccineId === vaccineId ? { ...v, hospitals: result } : v
+              ),
+            ])
+          ),
+        }));
+
+        return result;
+      } catch (error) {
+        console.error('Failed to fetch vaccine hospitals:', error);
+        return { all: [], government: [], private: [] };
+      }
+    },
+  };
+});

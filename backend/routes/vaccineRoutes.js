@@ -22,6 +22,9 @@ router.use(protect);
 // @GET /api/vaccines  - Get all vaccines (Parent + Admin)
 router.get('/', vaccineController.getAllVaccines);
 
+// @GET /api/vaccines/:id/hospitals  - Get hospitals where this vaccine is available
+router.get('/:id/hospitals', vaccineController.getVaccineHospitals);
+
 // @GET /api/vaccines/:id  - Get vaccine by ID (Parent + Admin)
 router.get('/:id', vaccineController.getVaccineById);
 
